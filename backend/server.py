@@ -1,0 +1,1321 @@
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
+from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from dotenv import load_dotenv
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
+import logging
+from pathlib import Path
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from typing import List, Optional, Literal, Any, Dict
+import uuid
+from datetime import datetime, timezone, timedelta
+import bcrypt
+import jwt as pyjwt
+import asyncio
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
+mongo_url = os.environ["MONGO_URL"]
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ["DB_NAME"]]
+
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ALGO = os.environ.get("JWT_ALGORITHM", "HS256")
+JWT_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "168"))
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
+app = FastAPI(title="NileNest API")
+api = APIRouter(prefix="/api")
+security = HTTPBearer(auto_error=False)
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("nilenest")
+
+
+# ---------- utils ----------
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def new_id() -> str:
+    return str(uuid.uuid4())
+
+
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(pw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def create_token(user_id: str, role: str) -> str:
+    payload = {
+        "sub": user_id,
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_HOURS),
+    }
+    return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+async def get_current_user(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[dict]:
+    if not creds:
+        return None
+    try:
+        payload = pyjwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
+    except Exception:
+        return None
+    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+    return user
+
+
+async def require_user(user=Depends(get_current_user)) -> dict:
+    if not user:
+        raise HTTPException(401, "Authentication required")
+    return user
+
+
+async def require_admin(user=Depends(require_user)) -> dict:
+    if user.get("role") not in ("admin", "editor"):
+        raise HTTPException(403, "Admin/Editor role required")
+    return user
+
+
+async def require_admin_only(user=Depends(require_user)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin role required")
+    return user
+
+
+async def audit(actor_id: str, action: str, target: str, meta: Optional[dict] = None):
+    await db.audit_log.insert_one(
+        {
+            "id": new_id(),
+            "actor_id": actor_id,
+            "action": action,
+            "target": target,
+            "meta": meta or {},
+            "at": now_iso(),
+        }
+    )
+
+
+# ---------- models ----------
+class RegisterReq(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    name: str = Field(min_length=1)
+
+
+class LoginReq(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class Address(BaseModel):
+    label: Optional[str] = "Home"
+    name: str
+    phone: str
+    line1: str
+    line2: Optional[str] = ""
+    city: str
+    state: str
+    pincode: str
+    country: str = "India"
+
+
+class Variant(BaseModel):
+    id: str = Field(default_factory=new_id)
+    name: str
+    sku: str
+    weight_g: Optional[int] = None
+    mrp: float
+    price: float
+    stock: int = 0
+    stock_state: Literal["IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK"] = "IN_STOCK"
+
+
+class Product(BaseModel):
+    id: str = Field(default_factory=new_id)
+    slug: str
+    title: str
+    subtitle: Optional[str] = ""
+    category_id: str
+    tagline: Optional[str] = ""
+    description: str
+    story: Optional[str] = ""
+    ingredients: List[str] = []
+    nutrition: Dict[str, str] = {}
+    certifications: List[str] = []
+    transparency: List[Dict[str, str]] = []
+    images: List[str] = []
+    tags: List[str] = []
+    variants: List[Variant] = []
+    is_active: bool = True
+    is_featured: bool = False
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class Category(BaseModel):
+    id: str = Field(default_factory=new_id)
+    slug: str
+    name: str
+    description: Optional[str] = ""
+    image: Optional[str] = ""
+
+
+class CartItemIn(BaseModel):
+    product_id: str
+    variant_id: str
+    quantity: int = 1
+
+
+class CartPatch(BaseModel):
+    product_id: str
+    variant_id: str
+    quantity: int
+
+
+class Coupon(BaseModel):
+    id: str = Field(default_factory=new_id)
+    code: str
+    type: Literal["PERCENT", "FLAT", "FREE_SHIPPING", "FIRST_ORDER"]
+    value: float = 0
+    min_subtotal: float = 0
+    max_discount: Optional[float] = None
+    active: bool = True
+    expires_at: Optional[str] = None
+
+
+class CheckoutReq(BaseModel):
+    email: EmailStr
+    address: Address
+    coupon_code: Optional[str] = None
+    delivery_method: Literal["STANDARD", "EXPRESS"] = "STANDARD"
+    payment_method: Literal["MOCK", "COD"] = "MOCK"
+    cart_id: Optional[str] = None
+
+
+class OrderStatusUpdate(BaseModel):
+    status: Literal["PLACED", "PACKED", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"]
+    tracking_id: Optional[str] = None
+
+
+class Article(BaseModel):
+    id: str = Field(default_factory=new_id)
+    slug: str
+    title: str
+    excerpt: str
+    body_html: str
+    hero_image: str
+    author: str = "NileNest Editorial"
+    tags: List[str] = []
+    related_product_ids: List[str] = []
+    published: bool = True
+    published_at: str = Field(default_factory=now_iso)
+
+
+class CmsBlock(BaseModel):
+    key: str
+    data: Dict[str, Any]
+
+
+class Review(BaseModel):
+    id: str = Field(default_factory=new_id)
+    product_id: str
+    user_id: str
+    user_name: str
+    rating: int
+    title: Optional[str] = ""
+    body: str
+    verified_purchase: bool = False
+    created_at: str = Field(default_factory=now_iso)
+
+
+class ChatReq(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    context_product_id: Optional[str] = None
+
+
+# ---------- helpers ----------
+def stock_state(stock: int) -> str:
+    if stock <= 0:
+        return "OUT_OF_STOCK"
+    if stock <= 5:
+        return "LOW_STOCK"
+    return "IN_STOCK"
+
+
+def clean(doc: dict) -> dict:
+    if not doc:
+        return doc
+    doc.pop("_id", None)
+    return doc
+
+
+async def get_or_create_cart(user_id: Optional[str], cart_id: Optional[str]) -> dict:
+    if user_id:
+        cart = await db.carts.find_one({"user_id": user_id}, {"_id": 0})
+        if cart:
+            return cart
+    if cart_id:
+        cart = await db.carts.find_one({"id": cart_id}, {"_id": 0})
+        if cart:
+            return cart
+    cart = {
+        "id": new_id(),
+        "user_id": user_id,
+        "items": [],
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.carts.insert_one(cart.copy())
+    return cart
+
+
+async def recalc_cart(cart: dict) -> dict:
+    subtotal = 0.0
+    mrp_total = 0.0
+    hydrated_items = []
+    for item in cart["items"]:
+        product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
+        if not product:
+            continue
+        variant = next((v for v in product["variants"] if v["id"] == item["variant_id"]), None)
+        if not variant:
+            continue
+        line_total = variant["price"] * item["quantity"]
+        subtotal += line_total
+        mrp_total += variant["mrp"] * item["quantity"]
+        hydrated_items.append(
+            {
+                "product_id": product["id"],
+                "variant_id": variant["id"],
+                "slug": product["slug"],
+                "title": product["title"],
+                "variant_name": variant["name"],
+                "image": product["images"][0] if product.get("images") else "",
+                "price": variant["price"],
+                "mrp": variant["mrp"],
+                "quantity": item["quantity"],
+                "line_total": round(line_total, 2),
+                "stock_state": variant.get("stock_state", "IN_STOCK"),
+            }
+        )
+    savings = round(mrp_total - subtotal, 2)
+    cart["hydrated_items"] = hydrated_items
+    cart["subtotal"] = round(subtotal, 2)
+    cart["mrp_total"] = round(mrp_total, 2)
+    cart["savings"] = savings
+    cart["item_count"] = sum(i["quantity"] for i in hydrated_items)
+    return cart
+
+
+def apply_coupon(subtotal: float, coupon: Optional[dict], is_first_order: bool) -> dict:
+    discount = 0.0
+    free_shipping = False
+    error = None
+    if coupon:
+        if not coupon.get("active"):
+            error = "Coupon is inactive"
+        elif subtotal < coupon.get("min_subtotal", 0):
+            error = f"Minimum order ₹{coupon['min_subtotal']} required"
+        elif coupon["type"] == "FIRST_ORDER" and not is_first_order:
+            error = "Coupon valid for first-time orders only"
+        else:
+            t = coupon["type"]
+            if t == "PERCENT":
+                discount = subtotal * coupon["value"] / 100
+                if coupon.get("max_discount"):
+                    discount = min(discount, coupon["max_discount"])
+            elif t == "FLAT":
+                discount = min(subtotal, coupon["value"])
+            elif t == "FIRST_ORDER":
+                discount = min(subtotal, coupon.get("value", 0))
+            elif t == "FREE_SHIPPING":
+                free_shipping = True
+    return {"discount": round(discount, 2), "free_shipping": free_shipping, "error": error}
+
+
+def totals(subtotal: float, discount: float, free_shipping: bool, method: str) -> dict:
+    shipping = 0.0
+    if subtotal < 499 and not free_shipping:
+        shipping = 49.0
+    if method == "EXPRESS" and not free_shipping:
+        shipping += 79.0
+    tax = round((subtotal - discount) * 0.05, 2)
+    total = round(subtotal - discount + shipping + tax, 2)
+    return {
+        "shipping": shipping,
+        "tax": tax,
+        "total": total,
+    }
+
+
+# ---------- health ----------
+@api.get("/")
+async def root():
+    return {"service": "NileNest", "status": "ok"}
+
+
+# ---------- auth ----------
+@api.post("/auth/register")
+async def register(req: RegisterReq):
+    existing = await db.users.find_one({"email": req.email.lower()})
+    if existing:
+        raise HTTPException(400, "Email already registered")
+    user = {
+        "id": new_id(),
+        "email": req.email.lower(),
+        "name": req.name,
+        "password_hash": hash_password(req.password),
+        "role": "customer",
+        "addresses": [],
+        "preferences": {},
+        "created_at": now_iso(),
+    }
+    await db.users.insert_one(user)
+    token = create_token(user["id"], user["role"])
+    user.pop("password_hash", None)
+    user.pop("_id", None)
+    return {"token": token, "user": user}
+
+
+@api.post("/auth/login")
+async def login(req: LoginReq):
+    user = await db.users.find_one({"email": req.email.lower()})
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(401, "Invalid credentials")
+    token = create_token(user["id"], user["role"])
+    user.pop("password_hash", None)
+    user.pop("_id", None)
+    return {"token": token, "user": user}
+
+
+@api.get("/auth/me")
+async def me(user=Depends(require_user)):
+    return user
+
+
+class AddressReq(BaseModel):
+    address: Address
+
+
+@api.post("/auth/addresses")
+async def add_address(req: AddressReq, user=Depends(require_user)):
+    addr = req.address.model_dump()
+    addr["id"] = new_id()
+    await db.users.update_one({"id": user["id"]}, {"$push": {"addresses": addr}})
+    return addr
+
+
+@api.delete("/auth/addresses/{addr_id}")
+async def del_address(addr_id: str, user=Depends(require_user)):
+    await db.users.update_one({"id": user["id"]}, {"$pull": {"addresses": {"id": addr_id}}})
+    return {"ok": True}
+
+
+# ---------- categories ----------
+@api.get("/categories")
+async def list_categories():
+    return await db.categories.find({}, {"_id": 0}).to_list(100)
+
+
+# ---------- products ----------
+@api.get("/products")
+async def list_products(
+    category: Optional[str] = None,
+    q: Optional[str] = None,
+    tag: Optional[str] = None,
+    featured: Optional[bool] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    sort: Optional[str] = None,
+):
+    query: Dict[str, Any] = {"is_active": True}
+    if category:
+        cat = await db.categories.find_one({"slug": category}, {"_id": 0})
+        if cat:
+            query["category_id"] = cat["id"]
+    if tag:
+        query["tags"] = tag
+    if featured is not None:
+        query["is_featured"] = featured
+    if q:
+        query["$or"] = [
+            {"title": {"$regex": q, "$options": "i"}},
+            {"description": {"$regex": q, "$options": "i"}},
+            {"tags": {"$regex": q, "$options": "i"}},
+        ]
+    products = await db.products.find(query, {"_id": 0}).to_list(500)
+    if min_price is not None:
+        products = [p for p in products if p["variants"] and p["variants"][0]["price"] >= min_price]
+    if max_price is not None:
+        products = [p for p in products if p["variants"] and p["variants"][0]["price"] <= max_price]
+    if sort == "price_asc":
+        products.sort(key=lambda p: p["variants"][0]["price"] if p["variants"] else 0)
+    elif sort == "price_desc":
+        products.sort(key=lambda p: -(p["variants"][0]["price"] if p["variants"] else 0))
+    return products
+
+
+@api.get("/products/{slug}")
+async def get_product(slug: str):
+    product = await db.products.find_one({"slug": slug}, {"_id": 0})
+    if not product:
+        raise HTTPException(404, "Product not found")
+    reviews = await db.reviews.find({"product_id": product["id"]}, {"_id": 0}).to_list(50)
+    product["reviews"] = reviews
+    product["rating_avg"] = round(sum(r["rating"] for r in reviews) / len(reviews), 1) if reviews else 4.8
+    product["rating_count"] = len(reviews) if reviews else 24
+    return product
+
+
+# ---------- cart ----------
+@api.get("/cart")
+async def get_cart(cart_id: Optional[str] = None, user=Depends(get_current_user)):
+    cart = await get_or_create_cart(user["id"] if user else None, cart_id)
+    return await recalc_cart(cart)
+
+
+@api.post("/cart/items")
+async def add_to_cart(
+    item: CartItemIn, cart_id: Optional[str] = None, user=Depends(get_current_user)
+):
+    cart = await get_or_create_cart(user["id"] if user else None, cart_id)
+    found = False
+    for existing in cart["items"]:
+        if existing["product_id"] == item.product_id and existing["variant_id"] == item.variant_id:
+            existing["quantity"] += item.quantity
+            found = True
+            break
+    if not found:
+        cart["items"].append(item.model_dump())
+    cart["updated_at"] = now_iso()
+    await db.carts.update_one(
+        {"id": cart["id"]}, {"$set": {"items": cart["items"], "updated_at": cart["updated_at"]}}
+    )
+    return await recalc_cart(cart)
+
+
+@api.patch("/cart/items")
+async def update_cart(
+    patch: CartPatch, cart_id: Optional[str] = None, user=Depends(get_current_user)
+):
+    cart = await get_or_create_cart(user["id"] if user else None, cart_id)
+    if patch.quantity <= 0:
+        cart["items"] = [
+            i
+            for i in cart["items"]
+            if not (i["product_id"] == patch.product_id and i["variant_id"] == patch.variant_id)
+        ]
+    else:
+        for existing in cart["items"]:
+            if (
+                existing["product_id"] == patch.product_id
+                and existing["variant_id"] == patch.variant_id
+            ):
+                existing["quantity"] = patch.quantity
+                break
+    cart["updated_at"] = now_iso()
+    await db.carts.update_one(
+        {"id": cart["id"]}, {"$set": {"items": cart["items"], "updated_at": cart["updated_at"]}}
+    )
+    return await recalc_cart(cart)
+
+
+@api.post("/cart/apply-coupon")
+async def preview_coupon(payload: Dict[str, str], cart_id: Optional[str] = None, user=Depends(get_current_user)):
+    cart = await get_or_create_cart(user["id"] if user else None, cart_id)
+    cart = await recalc_cart(cart)
+    code = payload.get("code", "").upper().strip()
+    coupon = await db.coupons.find_one({"code": code}, {"_id": 0}) if code else None
+    is_first = True
+    if user:
+        prior = await db.orders.count_documents({"user_id": user["id"]})
+        is_first = prior == 0
+    result = apply_coupon(cart["subtotal"], coupon, is_first)
+    if not coupon and code:
+        result["error"] = "Invalid coupon code"
+    t = totals(cart["subtotal"], result["discount"], result["free_shipping"], "STANDARD")
+    return {
+        "coupon": coupon,
+        "discount": result["discount"],
+        "free_shipping": result["free_shipping"],
+        "error": result["error"],
+        **t,
+        "subtotal": cart["subtotal"],
+    }
+
+
+# ---------- checkout & orders ----------
+@api.post("/checkout")
+async def checkout(req: CheckoutReq, user=Depends(get_current_user)):
+    cart = await get_or_create_cart(user["id"] if user else None, req.cart_id)
+    cart = await recalc_cart(cart)
+    if not cart["hydrated_items"]:
+        raise HTTPException(400, "Cart is empty")
+
+    coupon = None
+    if req.coupon_code:
+        coupon = await db.coupons.find_one({"code": req.coupon_code.upper().strip()}, {"_id": 0})
+    is_first = True
+    if user:
+        prior = await db.orders.count_documents({"user_id": user["id"]})
+        is_first = prior == 0
+    cres = apply_coupon(cart["subtotal"], coupon, is_first)
+    if cres["error"] and coupon:
+        raise HTTPException(400, cres["error"])
+    t = totals(cart["subtotal"], cres["discount"], cres["free_shipping"], req.delivery_method)
+
+    # decrement stock
+    for item in cart["hydrated_items"]:
+        await db.products.update_one(
+            {"id": item["product_id"], "variants.id": item["variant_id"]},
+            {"$inc": {"variants.$.stock": -item["quantity"]}},
+        )
+        # refresh stock_state
+        prod = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
+        if prod:
+            for v in prod["variants"]:
+                v["stock_state"] = stock_state(v["stock"])
+            await db.products.update_one(
+                {"id": prod["id"]}, {"$set": {"variants": prod["variants"]}}
+            )
+
+    order = {
+        "id": new_id(),
+        "order_number": "NN" + datetime.now().strftime("%y%m%d") + new_id()[:4].upper(),
+        "user_id": user["id"] if user else None,
+        "email": req.email.lower(),
+        "address": req.address.model_dump(),
+        "items": cart["hydrated_items"],
+        "subtotal": cart["subtotal"],
+        "mrp_total": cart["mrp_total"],
+        "savings": cart["savings"],
+        "discount": cres["discount"],
+        "coupon_code": coupon["code"] if coupon else None,
+        "shipping": t["shipping"],
+        "tax": t["tax"],
+        "total": t["total"],
+        "delivery_method": req.delivery_method,
+        "payment_method": req.payment_method,
+        "payment_status": "PAID" if req.payment_method == "MOCK" else "PENDING",
+        "status": "PLACED",
+        "tracking_id": None,
+        "timeline": [{"status": "PLACED", "at": now_iso(), "note": "Order received"}],
+        "created_at": now_iso(),
+    }
+    await db.orders.insert_one(order.copy())
+    # clear cart
+    await db.carts.update_one({"id": cart["id"]}, {"$set": {"items": [], "updated_at": now_iso()}})
+    order.pop("_id", None)
+    return order
+
+
+@api.get("/orders/{order_number}")
+async def get_order(order_number: str, user=Depends(get_current_user)):
+    order = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if user and order.get("user_id") and order["user_id"] != user["id"]:
+        if user.get("role") not in ("admin", "editor"):
+            raise HTTPException(403, "Not your order")
+    return order
+
+
+@api.get("/orders")
+async def my_orders(user=Depends(require_user)):
+    orders = await db.orders.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return orders
+
+
+# ---------- journal ----------
+@api.get("/articles")
+async def list_articles(tag: Optional[str] = None):
+    q: Dict[str, Any] = {"published": True}
+    if tag:
+        q["tags"] = tag
+    return await db.articles.find(q, {"_id": 0}).sort("published_at", -1).to_list(100)
+
+
+@api.get("/articles/{slug}")
+async def get_article(slug: str):
+    article = await db.articles.find_one({"slug": slug}, {"_id": 0})
+    if not article:
+        raise HTTPException(404, "Article not found")
+    related = []
+    for pid in article.get("related_product_ids", []):
+        p = await db.products.find_one({"id": pid}, {"_id": 0})
+        if p:
+            related.append(p)
+    article["related_products"] = related
+    return article
+
+
+# ---------- CMS ----------
+@api.get("/cms/{key}")
+async def get_cms(key: str):
+    block = await db.cms_blocks.find_one({"key": key}, {"_id": 0})
+    if not block:
+        return {"key": key, "data": {}}
+    return block
+
+
+# ---------- reviews ----------
+@api.post("/reviews")
+async def create_review(review: Dict[str, Any], user=Depends(require_user)):
+    has_order = await db.orders.find_one(
+        {"user_id": user["id"], "items.product_id": review["product_id"]}
+    )
+    r = {
+        "id": new_id(),
+        "product_id": review["product_id"],
+        "user_id": user["id"],
+        "user_name": user["name"],
+        "rating": int(review["rating"]),
+        "title": review.get("title", ""),
+        "body": review["body"],
+        "verified_purchase": bool(has_order),
+        "created_at": now_iso(),
+    }
+    await db.reviews.insert_one(r.copy())
+    r.pop("_id", None)
+    return r
+
+
+# ---------- AI Assistant (Gemini via Emergent) ----------
+async def build_ai_context(product_id: Optional[str] = None) -> str:
+    products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(50)
+    articles = await db.articles.find({"published": True}, {"_id": 0}).to_list(20)
+    parts = ["# NileNest Product Catalog"]
+    for p in products:
+        v = p["variants"][0] if p["variants"] else {"price": 0, "mrp": 0, "name": ""}
+        parts.append(
+            f"- {p['title']} ({p['slug']}) — ₹{v['price']} ({v['name']}). {p['description'][:200]}"
+        )
+        if p.get("ingredients"):
+            parts.append(f"  Ingredients: {', '.join(p['ingredients'])}")
+        if p.get("tags"):
+            parts.append(f"  Tags: {', '.join(p['tags'])}")
+    parts.append("\n# Editorial Journal")
+    for a in articles:
+        parts.append(f"- {a['title']}: {a['excerpt']}")
+    if product_id:
+        p = next((x for x in products if x["id"] == product_id), None)
+        if p:
+            parts.append(f"\n# Currently viewing: {p['title']}\n{p['description']}")
+    return "\n".join(parts)
+
+
+@api.post("/ai/chat")
+async def ai_chat(req: ChatReq, user=Depends(get_current_user)):
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(500, "AI not configured")
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+
+    session_id = req.session_id or new_id()
+    ctx = await build_ai_context(req.context_product_id)
+    system = f"""You are the NileNest Concierge — a warm, restrained, premium wellness assistant for a D2C Indian FMCG brand.
+
+STRICT RULES:
+1. You ONLY discuss NileNest products and journal content shown below. Never invent SKUs, prices, or ingredients.
+2. NEVER give medical, dosage, therapeutic, or health-claim advice. If asked, respond:
+   "I'm not able to offer medical or dosage guidance. Please consult a qualified practitioner. I can share what's in our product and how it fits into everyday rituals."
+3. Never claim curing, treating, or preventing any disease.
+4. Recommend at most 2 products per response, only when relevant. Use their exact titles.
+5. Keep responses concise, warm, and elegant. Use plain prose. No emojis.
+6. If asked about anything outside NileNest catalog/journal, politely redirect.
+
+CATALOG & JOURNAL:
+{ctx}
+"""
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system).with_model(
+        "gemini", "gemini-3-flash-preview"
+    )
+
+    await db.chat_messages.insert_one(
+        {
+            "id": new_id(),
+            "session_id": session_id,
+            "role": "user",
+            "content": req.message,
+            "at": now_iso(),
+        }
+    )
+
+    async def event_gen():
+        full = ""
+        try:
+            async for ev in chat.stream_message(UserMessage(text=req.message)):
+                if isinstance(ev, TextDelta):
+                    full += ev.content
+                    yield f"data: {ev.content}\n\n".replace("\n\n", "\ue000").replace(
+                        "\ue000", "\n\n"
+                    )
+                elif isinstance(ev, StreamDone):
+                    break
+        except Exception as e:
+            log.exception("AI stream error")
+            yield f"data: [error: {str(e)[:120]}]\n\n"
+        yield "event: done\ndata: {}\n\n"
+        await db.chat_messages.insert_one(
+            {
+                "id": new_id(),
+                "session_id": session_id,
+                "role": "assistant",
+                "content": full,
+                "at": now_iso(),
+            }
+        )
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Session-Id": session_id},
+    )
+
+
+@api.post("/ai/recommend")
+async def ai_recommend(payload: Dict[str, Any], user=Depends(get_current_user)):
+    """Non-streaming quick recommender — returns 1-2 product slugs based on user goal."""
+    if not EMERGENT_LLM_KEY:
+        return {"recommendations": [], "message": ""}
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    goal = payload.get("goal", "")
+    products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(50)
+    catalog = "\n".join(
+        [f"- slug={p['slug']} | {p['title']}: {p['description'][:150]}" for p in products]
+    )
+    system = f"""Recommend 1-2 NileNest products from the exact catalog below based on the user's stated wellness goal or moment.
+Respond ONLY as: SLUGS: slug1,slug2 | MESSAGE: <one warm sentence>
+No medical claims. Use only slugs from the catalog.
+
+CATALOG:
+{catalog}"""
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY, session_id=new_id(), system_message=system
+    ).with_model("gemini", "gemini-3-flash-preview")
+    try:
+        resp = await chat.send_message(UserMessage(text=goal or "Recommend something calming for the evening."))
+        text = str(resp)
+        slugs_part, msg_part = "", text
+        if "SLUGS:" in text:
+            after = text.split("SLUGS:", 1)[1]
+            if "|" in after:
+                slugs_part, rest = after.split("|", 1)
+                if "MESSAGE:" in rest:
+                    msg_part = rest.split("MESSAGE:", 1)[1].strip()
+        slugs = [s.strip() for s in slugs_part.split(",") if s.strip()][:2]
+        recs = []
+        for s in slugs:
+            p = next((x for x in products if x["slug"] == s), None)
+            if p:
+                recs.append(p)
+        return {"recommendations": recs, "message": msg_part.strip()[:280]}
+    except Exception as e:
+        log.exception("ai_recommend failed")
+        return {"recommendations": products[:2], "message": "A gentle start for your ritual."}
+
+
+# ---------- ADMIN ----------
+@api.get("/admin/stats")
+async def admin_stats(user=Depends(require_admin)):
+    today = datetime.now(timezone.utc).date().isoformat()
+    orders_today = await db.orders.count_documents({"created_at": {"$gte": today}})
+    total_orders = await db.orders.count_documents({})
+    all_orders = await db.orders.find({}, {"_id": 0, "total": 1, "created_at": 1}).to_list(2000)
+    revenue = round(sum(o["total"] for o in all_orders), 2)
+    revenue_today = round(sum(o["total"] for o in all_orders if o["created_at"] >= today), 2)
+    low_stock_products = await db.products.find({}, {"_id": 0}).to_list(500)
+    low_stock = []
+    for p in low_stock_products:
+        for v in p.get("variants", []):
+            if v["stock"] <= 5:
+                low_stock.append(
+                    {"product": p["title"], "variant": v["name"], "stock": v["stock"]}
+                )
+    return {
+        "orders_today": orders_today,
+        "total_orders": total_orders,
+        "revenue": revenue,
+        "revenue_today": revenue_today,
+        "low_stock": low_stock,
+        "product_count": await db.products.count_documents({}),
+        "customer_count": await db.users.count_documents({"role": "customer"}),
+    }
+
+
+@api.get("/admin/orders")
+async def admin_orders(user=Depends(require_admin)):
+    return await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api.patch("/admin/orders/{order_id}")
+async def admin_update_order(order_id: str, upd: OrderStatusUpdate, user=Depends(require_admin)):
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    order["timeline"].append(
+        {"status": upd.status, "at": now_iso(), "note": f"Status → {upd.status}"}
+    )
+    upd_dict = {"status": upd.status, "timeline": order["timeline"]}
+    if upd.tracking_id:
+        upd_dict["tracking_id"] = upd.tracking_id
+    await db.orders.update_one({"id": order_id}, {"$set": upd_dict})
+    await audit(user["id"], "order.update", order_id, {"status": upd.status})
+    return {"ok": True}
+
+
+@api.post("/admin/products")
+async def admin_create_product(product: Product, user=Depends(require_admin)):
+    doc = product.model_dump()
+    for v in doc["variants"]:
+        v["stock_state"] = stock_state(v["stock"])
+    await db.products.insert_one(doc.copy())
+    await audit(user["id"], "product.create", doc["id"])
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/admin/products/{product_id}")
+async def admin_update_product(product_id: str, payload: Dict[str, Any], user=Depends(require_admin)):
+    payload["updated_at"] = now_iso()
+    if "variants" in payload:
+        for v in payload["variants"]:
+            v["stock_state"] = stock_state(v.get("stock", 0))
+    await db.products.update_one({"id": product_id}, {"$set": payload})
+    await audit(user["id"], "product.update", product_id, {"keys": list(payload.keys())})
+    return {"ok": True}
+
+
+@api.delete("/admin/products/{product_id}")
+async def admin_delete_product(product_id: str, user=Depends(require_admin)):
+    await db.products.delete_one({"id": product_id})
+    await audit(user["id"], "product.delete", product_id)
+    return {"ok": True}
+
+
+@api.post("/admin/coupons")
+async def admin_create_coupon(coupon: Coupon, user=Depends(require_admin)):
+    doc = coupon.model_dump()
+    doc["code"] = doc["code"].upper().strip()
+    await db.coupons.insert_one(doc.copy())
+    await audit(user["id"], "coupon.create", doc["id"])
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/admin/coupons")
+async def admin_list_coupons(user=Depends(require_admin)):
+    return await db.coupons.find({}, {"_id": 0}).to_list(200)
+
+
+@api.delete("/admin/coupons/{coupon_id}")
+async def admin_delete_coupon(coupon_id: str, user=Depends(require_admin)):
+    await db.coupons.delete_one({"id": coupon_id})
+    await audit(user["id"], "coupon.delete", coupon_id)
+    return {"ok": True}
+
+
+@api.post("/admin/articles")
+async def admin_create_article(article: Article, user=Depends(require_admin)):
+    doc = article.model_dump()
+    await db.articles.insert_one(doc.copy())
+    await audit(user["id"], "article.create", doc["id"])
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/admin/articles/{article_id}")
+async def admin_update_article(article_id: str, payload: Dict[str, Any], user=Depends(require_admin)):
+    await db.articles.update_one({"id": article_id}, {"$set": payload})
+    await audit(user["id"], "article.update", article_id)
+    return {"ok": True}
+
+
+@api.delete("/admin/articles/{article_id}")
+async def admin_delete_article(article_id: str, user=Depends(require_admin)):
+    await db.articles.delete_one({"id": article_id})
+    await audit(user["id"], "article.delete", article_id)
+    return {"ok": True}
+
+
+@api.put("/admin/cms/{key}")
+async def admin_update_cms(key: str, block: CmsBlock, user=Depends(require_admin)):
+    await db.cms_blocks.update_one(
+        {"key": key}, {"$set": {"key": key, "data": block.data, "updated_at": now_iso()}}, upsert=True
+    )
+    await audit(user["id"], "cms.update", key)
+    return {"ok": True}
+
+
+@api.get("/admin/audit-log")
+async def admin_audit(user=Depends(require_admin)):
+    return await db.audit_log.find({}, {"_id": 0}).sort("at", -1).to_list(300)
+
+
+@api.get("/admin/customers")
+async def admin_customers(user=Depends(require_admin)):
+    return await db.users.find(
+        {"role": "customer"}, {"_id": 0, "password_hash": 0}
+    ).to_list(500)
+
+
+# ---------- SEO ----------
+@api.get("/seo/sitemap.xml", response_class=PlainTextResponse)
+async def sitemap():
+    base = "https://nilenest.in"
+    urls = [f"{base}/", f"{base}/shop", f"{base}/journal", f"{base}/faq", f"{base}/transparency"]
+    products = await db.products.find({"is_active": True}, {"_id": 0, "slug": 1}).to_list(500)
+    articles = await db.articles.find({"published": True}, {"_id": 0, "slug": 1}).to_list(500)
+    for p in products:
+        urls.append(f"{base}/product/{p['slug']}")
+    for a in articles:
+        urls.append(f"{base}/journal/{a['slug']}")
+    xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    for u in urls:
+        xml += f"<url><loc>{u}</loc></url>"
+    xml += "</urlset>"
+    return xml
+
+
+@api.get("/seo/robots.txt", response_class=PlainTextResponse)
+async def robots():
+    return "User-agent: *\nAllow: /\nSitemap: /api/seo/sitemap.xml\n"
+
+
+# ---------- seed ----------
+async def seed_data():
+    # admin
+    if not await db.users.find_one({"email": "admin@nilenest.in"}):
+        await db.users.insert_one(
+            {
+                "id": new_id(),
+                "email": "admin@nilenest.in",
+                "name": "NileNest Admin",
+                "password_hash": hash_password("NileNest@2026"),
+                "role": "admin",
+                "addresses": [],
+                "preferences": {},
+                "created_at": now_iso(),
+            }
+        )
+    if not await db.users.find_one({"email": "editor@nilenest.in"}):
+        await db.users.insert_one(
+            {
+                "id": new_id(),
+                "email": "editor@nilenest.in",
+                "name": "NileNest Editor",
+                "password_hash": hash_password("NileNest@2026"),
+                "role": "editor",
+                "addresses": [],
+                "preferences": {},
+                "created_at": now_iso(),
+            }
+        )
+
+    # categories
+    if await db.categories.count_documents({}) == 0:
+        cats = [
+            {
+                "id": new_id(),
+                "slug": "teas-infusions",
+                "name": "Teas & Infusions",
+                "description": "Slow-steeped rituals — hand-selected botanicals from Indian gardens.",
+                "image": "https://images.unsplash.com/photo-1615227875116-ae28a77814fb?crop=entropy&cs=srgb&fm=jpg&q=85",
+            },
+            {
+                "id": new_id(),
+                "slug": "clean-snacks",
+                "name": "Clean Snacks",
+                "description": "Roasted, never fried. Nothing you can't pronounce.",
+                "image": "https://images.unsplash.com/photo-1784676509476-6807c039b10f?crop=entropy&cs=srgb&fm=jpg&q=85",
+            },
+        ]
+        await db.categories.insert_many(cats)
+
+    tea_cat = await db.categories.find_one({"slug": "teas-infusions"})
+    snack_cat = await db.categories.find_one({"slug": "clean-snacks"})
+
+    # products
+    if await db.products.count_documents({}) == 0:
+        p1_variants = [
+            {
+                "id": new_id(),
+                "name": "50g Loose Leaf",
+                "sku": "NN-TEA-DV-50",
+                "weight_g": 50,
+                "mrp": 549,
+                "price": 449,
+                "stock": 42,
+                "stock_state": "IN_STOCK",
+            },
+            {
+                "id": new_id(),
+                "name": "100g Loose Leaf",
+                "sku": "NN-TEA-DV-100",
+                "weight_g": 100,
+                "mrp": 999,
+                "price": 799,
+                "stock": 28,
+                "stock_state": "IN_STOCK",
+            },
+        ]
+        p2_variants = [
+            {
+                "id": new_id(),
+                "name": "80g Pouch",
+                "sku": "NN-MAK-HP-80",
+                "weight_g": 80,
+                "mrp": 249,
+                "price": 199,
+                "stock": 60,
+                "stock_state": "IN_STOCK",
+            },
+            {
+                "id": new_id(),
+                "name": "Pack of 3",
+                "sku": "NN-MAK-HP-3PK",
+                "weight_g": 240,
+                "mrp": 699,
+                "price": 549,
+                "stock": 22,
+                "stock_state": "IN_STOCK",
+            },
+        ]
+        products = [
+            {
+                "id": new_id(),
+                "slug": "daily-vitality-herbal-tea",
+                "title": "Daily Vitality Herbal Tea",
+                "subtitle": "A morning ritual of tulsi, ginger, and rose",
+                "category_id": tea_cat["id"],
+                "tagline": "Grounded mornings, gentle mind.",
+                "description": "A restorative infusion of hand-picked tulsi from Uttarakhand foothills, fresh Kerala ginger, and Himalayan wild rose petals. Naturally caffeine-free. Slow-dried in single small batches to preserve the volatile aromatics.",
+                "story": "Sourced from three family-owned gardens across the Himalayan and Western Ghats belts. Each harvest is traceable to a named grower.",
+                "ingredients": [
+                    "Tulsi (Krishna variant)",
+                    "Ginger root",
+                    "Rose petals",
+                    "Cardamom",
+                    "Green cardamom pods",
+                ],
+                "nutrition": {
+                    "Serving": "2g",
+                    "Calories": "0 kcal",
+                    "Caffeine": "0 mg",
+                    "Added Sugar": "0 g",
+                    "Sodium": "0 mg",
+                },
+                "certifications": ["FSSAI Approved", "India Organic", "GMP Certified"],
+                "transparency": [
+                    {
+                        "title": "Origin",
+                        "value": "Uttarakhand, Kerala, Himachal Pradesh",
+                    },
+                    {"title": "Harvest", "value": "Winter 2025"},
+                    {"title": "Batch Size", "value": "Under 40kg per batch"},
+                    {"title": "Shelf Life", "value": "12 months from harvest"},
+                ],
+                "images": [
+                    "https://images.unsplash.com/photo-1615227875116-ae28a77814fb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxoZXJiYWwlMjB0ZWElMjBjdXAlMjBuYXR1cmFsJTIwbGlnaHRpbmd8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+                    "https://images.unsplash.com/photo-1732534253010-0772d2ded674?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwyfHxoZXJiYWwlMjB0ZWElMjBjdXAlMjBuYXR1cmFsJTIwbGlnaHRpbmd8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+                ],
+                "tags": ["caffeine-free", "morning", "calming", "ayurveda"],
+                "variants": p1_variants,
+                "is_active": True,
+                "is_featured": True,
+                "seo_title": "Daily Vitality Herbal Tea — Tulsi, Ginger, Rose | NileNest",
+                "seo_description": "A restorative caffeine-free infusion. Traceable botanicals from small Indian gardens.",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            },
+            {
+                "id": new_id(),
+                "slug": "himalayan-pink-salt-roasted-makhana",
+                "title": "Himalayan Pink Salt Roasted Makhana",
+                "subtitle": "Air-roasted lotus seeds. Nothing else.",
+                "category_id": snack_cat["id"],
+                "tagline": "Crisp, clean, unbothered.",
+                "description": "Hand-picked fox nuts (makhana) from the Mithila belt of Bihar, air-roasted in small copper drums with a single pinch of Himalayan pink salt. Zero seed oils, zero preservatives, zero drama.",
+                "story": "Every kilo is traceable to a Mithila-region cooperative that pays fair harvest wages to women farmers.",
+                "ingredients": ["Makhana (fox nuts)", "Himalayan pink salt"],
+                "nutrition": {
+                    "Serving": "30g",
+                    "Calories": "108 kcal",
+                    "Protein": "3.4 g",
+                    "Carbs": "22 g",
+                    "Fats": "0.5 g",
+                    "Sodium": "180 mg",
+                },
+                "certifications": ["FSSAI Approved", "Non-GMO", "Gluten Free"],
+                "transparency": [
+                    {"title": "Origin", "value": "Mithila, Bihar"},
+                    {"title": "Roasting", "value": "Small-batch copper drum"},
+                    {"title": "Oil Used", "value": "None"},
+                    {"title": "Shelf Life", "value": "6 months from packaging"},
+                ],
+                "images": [
+                    "https://images.unsplash.com/photo-1784676509476-6807c039b10f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwyfHxyb2FzdGVkJTIwZm94JTIwbnV0JTIwbWFraGFuYSUyMGhlYWx0aHklMjBzbmFja3xlbnwwfHx8fDE3ODgxOTM1Mjh8MA&ixlib=rb-4.1.0&q=85",
+                    "https://images.unsplash.com/photo-1711963915993-5967d3e64310?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHw0fHxyb2FzdGVkJTIwZm94JTIwbnV0JTIwbWFraGFuYSUyMGhlYWx0aHklMjBzbmFja3xlbnwwfHx8fDE3ODgxOTM1Mjh8MA&ixlib=rb-4.1.0&q=85",
+                ],
+                "tags": ["snack", "protein", "gluten-free", "roasted"],
+                "variants": p2_variants,
+                "is_active": True,
+                "is_featured": True,
+                "seo_title": "Himalayan Pink Salt Roasted Makhana | NileNest",
+                "seo_description": "Air-roasted lotus seeds with a single pinch of Himalayan pink salt. Nothing else.",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            },
+        ]
+        await db.products.insert_many(products)
+
+    # coupons
+    if await db.coupons.count_documents({}) == 0:
+        await db.coupons.insert_many(
+            [
+                {
+                    "id": new_id(),
+                    "code": "WELCOME10",
+                    "type": "PERCENT",
+                    "value": 10,
+                    "min_subtotal": 0,
+                    "max_discount": 200,
+                    "active": True,
+                    "expires_at": None,
+                },
+                {
+                    "id": new_id(),
+                    "code": "FREESHIP",
+                    "type": "FREE_SHIPPING",
+                    "value": 0,
+                    "min_subtotal": 0,
+                    "max_discount": None,
+                    "active": True,
+                    "expires_at": None,
+                },
+                {
+                    "id": new_id(),
+                    "code": "FIRSTBLOOM",
+                    "type": "FIRST_ORDER",
+                    "value": 150,
+                    "min_subtotal": 499,
+                    "max_discount": None,
+                    "active": True,
+                    "expires_at": None,
+                },
+            ]
+        )
+
+    # articles
+    if await db.articles.count_documents({}) == 0:
+        products = await db.products.find({}, {"_id": 0}).to_list(10)
+        pids = [p["id"] for p in products]
+        await db.articles.insert_many(
+            [
+                {
+                    "id": new_id(),
+                    "slug": "the-morning-ritual",
+                    "title": "The Morning Ritual: Slower Starts, Better Days",
+                    "excerpt": "Why the first ten minutes of your day matter more than the next ten hours.",
+                    "body_html": "<p>There's a quiet grammar to a good morning — and it doesn't start with a screen. In our editorial, we explore the science and softness of slower starts, and how a single cup of tulsi-ginger tea can anchor an unhurried mind.</p><p>Prepare 200ml of water at a rolling boil. Add 2g of loose leaf. Steep, uncovered, for 4 minutes. That's it.</p>",
+                    "hero_image": "https://images.unsplash.com/photo-1749137598868-94bde1951944?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTN8MHwxfHNlYXJjaHwyfHxmb3Jlc3QlMjBncmVlbiUyMG5hdHVyZSUyMGx1eHVyeXxlbnwwfHx8fDE3ODgxOTM1Mzl8MA&ixlib=rb-4.1.0&q=85",
+                    "author": "NileNest Editorial",
+                    "tags": ["ritual", "morning"],
+                    "related_product_ids": pids[:1],
+                    "published": True,
+                    "published_at": now_iso(),
+                },
+                {
+                    "id": new_id(),
+                    "slug": "the-case-for-makhana",
+                    "title": "The Case for Makhana: An Ancient Snack, Rediscovered",
+                    "excerpt": "How lotus seeds became the cleanest snack on your desk.",
+                    "body_html": "<p>Long before puffed rice and popcorn, there was makhana — harvested from lotus ponds in the Mithila region of Bihar, dried in the sun, and roasted over slow flames. A single serving carries protein, calcium, and a satisfying crunch — without a single drop of seed oil.</p>",
+                    "hero_image": "https://images.unsplash.com/photo-1730871083804-ceaeb8c08e79?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwzfHxtaW5pbWFsaXN0JTIwdGVycmFjb3R0YSUyMGNsYXklMjBjdXB8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+                    "author": "NileNest Editorial",
+                    "tags": ["snack", "history"],
+                    "related_product_ids": pids[1:2] if len(pids) > 1 else [],
+                    "published": True,
+                    "published_at": now_iso(),
+                },
+                {
+                    "id": new_id(),
+                    "slug": "traceability-matters",
+                    "title": "Why Traceability Matters (More Than Certifications)",
+                    "excerpt": "The single label promise every clean-food brand should make.",
+                    "body_html": "<p>Certifications are floors, not ceilings. At NileNest, every batch is traceable to a named farm, a harvest date, and a small-batch roast. Certifications tell you what isn't there. Traceability tells you what is.</p>",
+                    "hero_image": "https://images.unsplash.com/photo-1776975817012-c7a78c430e9e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwdGVycmFjb3R0YSUyMGNsYXklMjBjdXB8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+                    "author": "NileNest Editorial",
+                    "tags": ["transparency", "sourcing"],
+                    "related_product_ids": pids,
+                    "published": True,
+                    "published_at": now_iso(),
+                },
+            ]
+        )
+
+    # cms
+    if await db.cms_blocks.count_documents({"key": "homepage"}) == 0:
+        await db.cms_blocks.insert_one(
+            {
+                "key": "homepage",
+                "data": {
+                    "hero_overline": "New from NileNest",
+                    "hero_headline": "Nature, unhurried.",
+                    "hero_sub": "Premium wellness essentials, traceable to a farm, a harvest, and a hand.",
+                    "hero_cta": "Explore the shop",
+                    "hero_image": "https://images.unsplash.com/photo-1749137598868-94bde1951944?crop=entropy&cs=srgb&fm=jpg&q=85",
+                    "trust_strip": [
+                        "Traceable ingredients",
+                        "Small-batch roasted",
+                        "Zero seed oils",
+                        "Free shipping over ₹499",
+                    ],
+                    "story_headline": "Founded in a farmhouse. Built in a lab.",
+                    "story_body": "NileNest began between two kitchens — one in a Himalayan farmhouse, one in a Mumbai food-science lab. Each product is co-developed with the growers whose names appear on our transparency panel.",
+                },
+                "updated_at": now_iso(),
+            }
+        )
+
+
+@app.on_event("startup")
+async def on_startup():
+    try:
+        await seed_data()
+        log.info("Seed complete")
+    except Exception as e:
+        log.exception(f"Seed failed: {e}")
+
+
+app.include_router(api)
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Session-Id"],
+)
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    client.close()

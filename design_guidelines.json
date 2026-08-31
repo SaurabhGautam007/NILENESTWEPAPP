@@ -1,0 +1,120 @@
+{
+  "project_name": "NileNest",
+  "app_type": "e-commerce",
+  "theme_and_colors": {
+    "mode": "light",
+    "background": "Ivory (#F9F8F6)",
+    "foreground": "Deep Forest Green (#1A3A2F)",
+    "primary": "Deep Forest Green (#1A3A2F)",
+    "primary_foreground": "Ivory (#F9F8F6)",
+    "secondary": "Terracotta (#C05A42)",
+    "secondary_foreground": "Ivory (#F9F8F6)",
+    "accent": "Pale Sage (#E3E8E3)",
+    "accent_foreground": "Deep Forest Green (#1A3A2F)",
+    "muted": "Warm Grey (#EBE9E4)",
+    "muted_foreground": "Slate (#6B7280)",
+    "border": "Pale Sage (#E3E8E3)",
+    "notes": "Natural luxury - restrained. The primary background should always be a warm, organic Ivory, not pure white. Use Deep Forest Green for primary actions and strong typographic contrast. Terracotta should be used sparingly as an accent for call-to-actions, badges (e.g., 'Best Seller'), and interactive states."
+  },
+  "typography": {
+    "fonts": {
+      "headings": "'Cormorant Garamond', serif",
+      "body": "'Inter', sans-serif"
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none",
+      "h2": "text-3xl sm:text-4xl tracking-tight",
+      "h3": "text-2xl sm:text-3xl",
+      "h4": "text-xl",
+      "body": "text-base leading-relaxed tracking-normal",
+      "overline": "text-xs tracking-[0.2em] uppercase font-semibold text-secondary"
+    },
+    "notes": "Headings must use Cormorant Garamond for a premium, photography-driven natural luxury aesthetic. Inter provides sterile, clean legibility for dense e-commerce UI like product specs and ingredients."
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous whitespace. Let the premium photography breathe.",
+    "grids": {
+      "catalog": "grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8",
+      "bento_features": "grid-cols-1 md:grid-cols-12 gap-8"
+    },
+    "containers": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "surface": "Flat solid surfaces for product cards. Avoid heavy box-shadows. Use delicate 1px borders (border-border/60) with subtle background tinting on hover."
+  },
+  "components": {
+    "buttons": "Pill-shaped (rounded-full) or softly rounded (rounded-md). High contrast. Primary uses Deep Forest Green, Secondary uses Terracotta.",
+    "cards": "Cardless aesthetic preferred for product grids (image + text below without explicit card borders). Use subtle background fills for ingredient/transparency panels.",
+    "header": "Solid Ivory or Crystal Glass (backdrop-blur-xl bg-[#F9F8F6]/80) with a delicate bottom border. Do not use fully transparent headers over hero images to preserve navigation readability.",
+    "cart_drawer": "Slide-out cart using Sheet component. Minimalist lines, clear line-item breakdowns.",
+    "ai_assistant": "Floating widget in the bottom right using a Terracotta icon. Chat window should feel like a premium concierge service, grounded on product data.",
+    "shadcn_primitives_to_add": ["accordion", "sheet", "dialog", "button", "badge", "input", "label", "select", "tabs", "scroll-area", "sonner"]
+  },
+  "image_urls": {
+    "hero_and_mood": [
+      {
+        "url": "https://images.unsplash.com/photo-1749137598868-94bde1951944?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTN8MHwxfHNlYXJjaHwyfHxmb3Jlc3QlMjBncmVlbiUyMG5hdHVyZSUyMGx1eHVyeXxlbnwwfHx8fDE3ODgxOTM1Mzl8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Lush forest nature view, suitable for brand mood or 'Our Story' section background."
+      }
+    ],
+    "products": [
+      {
+        "url": "https://images.unsplash.com/photo-1615227875116-ae28a77814fb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxoZXJiYWwlMjB0ZWElMjBjdXAlMjBuYXR1cmFsJTIwbGlnaHRpbmd8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+        "category": "Daily Vitality Herbal Tea",
+        "description": "Clear glass mug of herbal tea on a wooden table, natural lighting."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1732534253010-0772d2ded674?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwyfHxoZXJiYWwlMjB0ZWElMjBjdXAlMjBuYXR1cmFsJTIwbGlnaHRpbmd8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+        "category": "Daily Vitality Herbal Tea",
+        "description": "A cup of tea on a wooden coaster."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1784676509476-6807c039b10f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwyfHxyb2FzdGVkJTIwZm94JTIwbnV0JTIwbWFraGFuYSUyMGhlYWx0aHklMjBzbmFja3xlbnwwfHx8fDE3ODgxOTM1Mjh8MA&ixlib=rb-4.1.0&q=85",
+        "category": "Himalayan Pink Salt Roasted Makhana",
+        "description": "Roasted snack bowl representing premium roasted makhana."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1711963915993-5967d3e64310?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHw0fHxyb2FzdGVkJTIwZm94JTIwbnV0JTIwbWFraGFuYSUyMGhlYWx0aHklMjBzbmFja3xlbnwwfHx8fDE3ODgxOTM1Mjh8MA&ixlib=rb-4.1.0&q=85",
+        "category": "Himalayan Pink Salt Roasted Makhana",
+        "description": "Bowl of roasted snacks on tablecloth."
+      }
+    ],
+    "accents_and_materials": [
+      {
+        "url": "https://images.unsplash.com/photo-1730871083804-ceaeb8c08e79?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwzfHxtaW5pbWFsaXN0JTIwdGVycmFjb3R0YSUyMGNsYXklMjBjdXB8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Minimalist terracotta clay cup, useful for visual accents matching the secondary color."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1776975817012-c7a78c430e9e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwdGVycmFjb3R0YSUyMGNsYXklMjBjdXB8ZW58MHx8fHwxNzg4MTkzNTI4fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Terracotta cups and saucers on a brown surface."
+      }
+    ]
+  },
+  "instructions_to_main_agent": {
+    "1": "Apply 'Natural Luxury - Restrained' visual direction. Override default shadcn variables with the specific Ivory/Forest Green/Terracotta theme provided.",
+    "2": "Integrate Google Fonts: Cormorant Garamond for all headings, Inter for body text.",
+    "3": "Build a robust PDP (Product Detail Page) with a Transparency Panel featuring an accordion for ingredients, nutrition, and certifications.",
+    "4": "Build a single-page accordion checkout flow that feels premium and frictionless, avoiding multiple page reloads.",
+    "5": "Implement a seamless Cart Drawer (using shadcn Sheet) rather than a cart page.",
+    "6": "Add a floating AI Assistant chat widget anchored to the bottom right. The AI chat UI should be styled elegantly, perhaps with a soft Ivory background and Deep Forest Green text.",
+    "7": "Ensure mobile-first catalog layout defaults to 2 columns on mobile, expanding up to 4 columns on desktop.",
+    "8": "Create the admin dashboard to manage catalog, orders, and CMS. Use denser 'Inter' typography and tighter grid layouts here to prioritize data density and function over spacious aesthetic."
+  },
+  "accessibility": {
+    "contrast": "Ensure Deep Forest Green text over Ivory background meets WCAG AA standards. Add focus rings (focus:ring-2 focus:ring-secondary focus:ring-offset-2) to all interactive elements.",
+    "semantic": "Use proper HTML5 semantic tags (<header>, <nav>, <main>, <article>, <section>, <footer>) for layout.",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute (e.g., data-testid='add-to-cart-button', data-testid='product-title')."
+  },
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy and thoughtful negative space.",
+    "Use generous padding (e.g., py-24 for sections) and whitespace. Cramped designs look cheap.",
+    "You MUST NOT apply universal transition (e.g., transition: all). This breaks transforms. Always add transitions for specific interactive elements.",
+    "You MUST NOT center align the app container, i.e., do not add .App { text-align: center; } in the css file.",
+    "Always use modern button styles (rounded-full or elegantly restrained borders) with interaction animations & color relevant to the app style.",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons. Use professional SVG icons (e.g., Lucide).",
+    "Use 'sonner' for toasts.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "NEVER use placeholder image URLs. Use the provided curated Unsplash images.",
+    "DO NOT use a fully transparent background in header, overlays, or any surface that has content scrolling under it."
+  ]
+}
