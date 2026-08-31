@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
+import { AIContextProvider } from "@/context/AIContext";
 import { Toaster } from "@/components/ui/sonner";
 import "@/index.css";
 import App from "@/App";
@@ -18,8 +19,10 @@ root.render(
     <BrowserRouter>
       <AuthProvider>
         <CartProvider>
-          <App />
-          <Toaster position="bottom-right" richColors />
+          <AIContextProvider>
+            <App />
+            <Toaster position="bottom-right" richColors />
+          </AIContextProvider>
         </CartProvider>
       </AuthProvider>
     </BrowserRouter>

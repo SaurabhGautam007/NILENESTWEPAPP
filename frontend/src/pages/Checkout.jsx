@@ -1,14 +1,25 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, money } from "@/lib/api";
+import { api, money, BACKEND } from "@/lib/api";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
+import { CreditCard } from "lucide-react";
+
+const loadRazorpay = () =>
+  new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.body.appendChild(s);
+  });
 
 export default function Checkout() {
-  const { cart } = useCart();
+  const { cart, refresh } = useCart();
   const { user } = useAuth();
   const nav = useNavigate();
   const [email, setEmail] = useState(user?.email || "");
@@ -17,6 +28,11 @@ export default function Checkout() {
   const [coupon, setCoupon] = useState("");
   const [couponInfo, setCouponInfo] = useState(null);
   const [placing, setPlacing] = useState(false);
+  const [config, setConfig] = useState({ razorpay_enabled: false });
+
+  useEffect(() => {
+    api.get("/config").then((r) => setConfig(r.data)).catch(() => {});
+  }, []);
 
   useEffect(() => { if (user) { setEmail(user.email); setAddr((a) => ({ ...a, name: user.name })); } }, [user]);
 
@@ -36,11 +52,16 @@ export default function Checkout() {
   const tax = Math.round((cart.subtotal - discount) * 0.05);
   const total = cart.subtotal - discount + shipping + tax;
 
-  const placeOrder = async () => {
+  const validate = () => {
     if (!email || !addr.name || !addr.phone || !addr.line1 || !addr.city || !addr.state || !addr.pincode) {
-      toast.error("Please fill in your delivery details."); return;
+      toast.error("Please fill in your delivery details."); return false;
     }
-    if (!cart.hydrated_items?.length) { toast.error("Your basket is empty."); return; }
+    if (!cart.hydrated_items?.length) { toast.error("Your basket is empty."); return false; }
+    return true;
+  };
+
+  const placeOrderMock = async () => {
+    if (!validate()) return;
     setPlacing(true);
     try {
       const cid = localStorage.getItem("nn_cart_id");
@@ -53,6 +74,48 @@ export default function Checkout() {
     } catch (e) { toast.error(e.response?.data?.detail || "Checkout failed"); }
     finally { setPlacing(false); }
   };
+
+  const placeOrderRazorpay = async () => {
+    if (!validate()) return;
+    setPlacing(true);
+    try {
+      const cid = localStorage.getItem("nn_cart_id");
+      const { data: rzp } = await api.post("/checkout/razorpay/create", {
+        cart_id: cid, coupon_code: couponInfo?.coupon?.code, delivery_method: delivery,
+      });
+      const ok = await loadRazorpay();
+      if (!ok) { toast.error("Payment SDK failed to load"); setPlacing(false); return; }
+      const opts = {
+        key: rzp.key_id,
+        amount: rzp.amount,
+        currency: rzp.currency,
+        order_id: rzp.razorpay_order_id,
+        name: "NileNest",
+        description: `Order · ${cart.hydrated_items.length} items`,
+        prefill: { name: addr.name, email, contact: addr.phone },
+        theme: { color: "#1A3A2F" },
+        handler: async (resp) => {
+          try {
+            const { data: order } = await api.post("/checkout/razorpay/verify", {
+              razorpay_order_id: resp.razorpay_order_id,
+              razorpay_payment_id: resp.razorpay_payment_id,
+              razorpay_signature: resp.razorpay_signature,
+              email, address: addr, coupon_code: couponInfo?.coupon?.code, delivery_method: delivery, cart_id: cid,
+            });
+            toast.success("Payment successful");
+            refresh();
+            nav(`/order/${order.order_number}`);
+          } catch (e) { toast.error("Verification failed"); }
+        },
+        modal: { ondismiss: () => setPlacing(false) },
+      };
+      const rp = new window.Razorpay(opts);
+      rp.on("payment.failed", () => { toast.error("Payment failed"); setPlacing(false); });
+      rp.open();
+    } catch (e) { toast.error(e.response?.data?.detail || "Could not start payment"); setPlacing(false); }
+  };
+
+  const placeOrder = config.razorpay_enabled ? placeOrderRazorpay : placeOrderMock;
 
   if (!cart.hydrated_items?.length) {
     return <div className="container-nl py-24 text-center">
@@ -108,9 +171,19 @@ export default function Checkout() {
           </AccordionItem>
           <AccordionItem value="payment"><AccordionTrigger className="font-display text-xl">Payment</AccordionTrigger>
             <AccordionContent>
-              <div className="p-4 bg-accent/40 rounded-md text-sm">
-                <div className="font-medium">Test payment (mock gateway)</div>
-                <p className="text-muted-foreground mt-1 text-xs">Razorpay adapter reserved — v1 uses a test mock so end-to-end flows work without keys.</p>
+              <div className="p-4 bg-accent/40 rounded-md text-sm flex items-center gap-3">
+                <CreditCard className="w-5 h-5 text-secondary" />
+                {config.razorpay_enabled ? (
+                  <div>
+                    <div className="font-medium">Razorpay — cards, UPI, netbanking, wallets</div>
+                    <p className="text-muted-foreground text-xs mt-1">Test card: 4111 1111 1111 1111, any future date, CVV 123.</p>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="font-medium">Mock payment (Razorpay ready when keys are added)</div>
+                    <p className="text-muted-foreground text-xs mt-1">Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in backend .env to activate real payments.</p>
+                  </div>
+                )}
               </div>
             </AccordionContent>
           </AccordionItem>
@@ -140,7 +213,7 @@ export default function Checkout() {
             <div className="flex justify-between text-lg pt-3 border-t border-border/60"><span className="font-display">Total</span><span className="font-medium">{money(total)}</span></div>
           </div>
           <button data-testid={TID.checkout.place} onClick={placeOrder} disabled={placing} className="btn-secondary w-full mt-6 disabled:opacity-40">
-            {placing ? "Placing…" : `Place Order · ${money(total)}`}
+            {placing ? "Placing…" : config.razorpay_enabled ? `Pay with Razorpay · ${money(total)}` : `Place Order · ${money(total)}`}
           </button>
         </div>
       </aside>

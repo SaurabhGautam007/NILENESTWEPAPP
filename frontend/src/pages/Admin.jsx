@@ -124,6 +124,22 @@ function Catalog() {
     await api.patch(`/admin/products/${product.id}`, { variants });
     toast.success("Stock updated"); load();
   };
+  const uploadImage = async (product, file) => {
+    const fd = new FormData(); fd.append("file", file);
+    try {
+      const { data } = await api.post("/admin/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const backend = process.env.REACT_APP_BACKEND_URL;
+      const url = `${backend}${data.url}`;
+      const images = [...(product.images || []), url];
+      await api.patch(`/admin/products/${product.id}`, { images });
+      toast.success("Image uploaded"); load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Upload failed"); }
+  };
+  const removeImage = async (product, url) => {
+    const images = (product.images || []).filter((u) => u !== url);
+    await api.patch(`/admin/products/${product.id}`, { images });
+    load();
+  };
   return (
     <div className="space-y-6">
       {products.map((p) => (
@@ -144,6 +160,21 @@ function Catalog() {
                     <span className={`text-xs ${v.stock_state === "OUT_OF_STOCK" ? "text-destructive" : v.stock_state === "LOW_STOCK" ? "text-secondary" : "text-muted-foreground"}`}>{v.stock_state}</span>
                   </div>
                 ))}
+              </div>
+              <div className="mt-4 pt-4 border-t border-border/40">
+                <div className="overline text-secondary mb-2">Images</div>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {(p.images || []).map((u) => (
+                    <div key={u} className="relative group">
+                      <img src={u} alt="" className="w-16 h-16 object-cover rounded-md" />
+                      <button onClick={() => removeImage(p, u)} className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                    </div>
+                  ))}
+                </div>
+                <label className="btn-ghost text-xs cursor-pointer inline-flex" data-testid={`upload-image-${p.slug}`}>
+                  Upload image
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadImage(p, e.target.files[0])} />
+                </label>
               </div>
             </div>
           </div>

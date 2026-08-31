@@ -1,11 +1,18 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Header, Query, Response
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
+import ipaddress
 import logging
+import hmac
+import hashlib
+from html import escape
+from html.parser import HTMLParser
+from urllib.parse import urlparse
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional, Literal, Any, Dict
@@ -14,6 +21,8 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt as pyjwt
 import asyncio
+import httpx
+import requests
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -26,6 +35,214 @@ JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGO = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "168"))
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+EMERGENT_EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "NileNest")
+EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO")
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+APP_NAME = os.environ.get("APP_NAME", "nilenest")
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "").strip()
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "").strip()
+RAZORPAY_ENABLED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
+_rzp_client = None
+if RAZORPAY_ENABLED:
+    try:
+        import razorpay
+        _rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+    except Exception as _e:
+        _rzp_client = None
+
+# ---------- Object storage (Emergent) ----------
+_storage_key = None
+
+def init_storage(force: bool = False):
+    global _storage_key
+    if _storage_key and not force:
+        return _storage_key
+    if not EMERGENT_LLM_KEY:
+        return None
+    try:
+        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_LLM_KEY}, timeout=30)
+        resp.raise_for_status()
+        _storage_key = resp.json()["storage_key"]
+        return _storage_key
+    except Exception as e:
+        logging.getLogger("nilenest").warning(f"Storage init failed: {e}")
+        return None
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    if not key:
+        raise HTTPException(500, "Storage not available")
+    resp = requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data,
+        timeout=120,
+    )
+    if resp.status_code in (403, 404):
+        # try refresh
+        key = init_storage(force=True)
+        resp = requests.put(
+            f"{STORAGE_URL}/objects/{path}",
+            headers={"X-Storage-Key": key, "Content-Type": content_type},
+            data=data,
+            timeout=120,
+        )
+    resp.raise_for_status()
+    return resp.json()
+
+def get_object(path: str):
+    key = init_storage()
+    if not key:
+        raise HTTPException(500, "Storage not available")
+    resp = requests.get(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key},
+        timeout=60,
+    )
+    if resp.status_code == 404:
+        raise HTTPException(404, "File not found")
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+# ---------- Email (Resend via Emergent) — guardrail-gated ----------
+_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
+_CRED_ASK = (
+    "reply with your password", "reply with the code", "send your password",
+    "cvv", "send us your password", "enter your password below",
+    "confirm your card number", "your full card number", "seed phrase",
+    "recovery phrase", "verify your card", "social security number",
+    "confirm your bank details",
+)
+_HOSTISH = re.compile(r"\b(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,})", re.I)
+
+
+def _host_ok(host: str) -> bool:
+    if not host or "xn--" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host == s or host.endswith("." + s) for s in _SHORTENERS)
+
+
+def _same_site(shown: str, real: str) -> bool:
+    return shown == real or real.endswith("." + shown) or shown.endswith("." + real)
+
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tags = set()
+        self.urls = []
+        self.anchors = []
+        self._href = None
+        self._text = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag.lower())
+        self.urls += [v for k, v in attrs if k.lower() in ("href", "src") and v]
+        if tag.lower() == "a":
+            self._href = dict((k.lower(), v) for k, v in attrs).get("href")
+            self._text = []
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            self.anchors.append((self._href, "".join(self._text)))
+            self._href = None
+            self._text = []
+
+
+def _assert_safe_email(subject: str, html: str) -> None:
+    scan = _EmailScan()
+    scan.feed(html)
+    if scan.tags & {"form", "input", "textarea", "select"}:
+        raise ValueError("No forms or input fields in email (G2)")
+    body = f"{subject}\n{html}".lower()
+    for p in _CRED_ASK:
+        if p in body:
+            raise ValueError(f"Email asks for credentials: {p!r} (G2)")
+    for url in scan.urls:
+        low = url.strip().lower()
+        if low.startswith(("mailto:", "tel:", "cid:", "#")):
+            continue
+        if not low.startswith("https://"):
+            raise ValueError(f"Email links/assets must be https: {url!r} (G3)")
+        host = urlparse(low).hostname or ""
+        if not _host_ok(host) or urlparse(low).username is not None:
+            raise ValueError(f"Bad email URL: {url!r} (G3)")
+    for href, text in scan.anchors:
+        real = urlparse(href.strip().lower()).hostname or ""
+        if not real:
+            continue
+        for m in _HOSTISH.finditer(text):
+            if not _same_site(m.group(1).lower(), real):
+                raise ValueError(f"Anchor host mismatch: text={m.group(1)!r} real={real!r} (G3)")
+
+
+async def send_email(*, to: str, subject: str, html: str, reply_to: Optional[str] = None) -> Optional[str]:
+    if not EMERGENT_EMAIL_KEY:
+        logging.getLogger("nilenest").info(f"Email skipped (no key). To: {to} Subject: {subject}")
+        return None
+    _assert_safe_email(subject, html)
+    payload = {"to": [to], "subject": subject, "html": html, "from_name": EMAIL_FROM_NAME}
+    if reply_to or EMAIL_REPLY_TO:
+        payload["contact_email"] = reply_to or EMAIL_REPLY_TO
+    try:
+        async with httpx.AsyncClient(timeout=30) as ac:
+            resp = await ac.post(
+                f"{EMAIL_BASE_URL}/api/v1/email/send",
+                headers={"X-Email-Key": EMERGENT_EMAIL_KEY},
+                json=payload,
+            )
+        resp.raise_for_status()
+        return resp.json().get("id")
+    except Exception as e:
+        logging.getLogger("nilenest").warning(f"Email send failed: {e}")
+        return None
+
+
+def _order_email_html(order: dict) -> str:
+    rows = "".join(
+        f'<tr><td style="padding:8px 0;border-bottom:1px solid #EBE9E4">{escape(i["title"])} — {escape(i["variant_name"])} × {i["quantity"]}</td>'
+        f'<td style="padding:8px 0;border-bottom:1px solid #EBE9E4;text-align:right">₹{int(i["line_total"])}</td></tr>'
+        for i in order["items"]
+    )
+    return (
+        f'<table role="presentation" width="100%" style="background:#F9F8F6;font-family:Arial,sans-serif;color:#1A3A2F">'
+        f'<tr><td style="padding:32px 24px">'
+        f'<div style="font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:#C05A42">Order confirmed</div>'
+        f'<h1 style="font-family:Georgia,serif;font-size:28px;margin:8px 0 24px">Thank you, {escape(order["address"]["name"].split()[0])}.</h1>'
+        f'<p>Your NileNest order <strong>{escape(order["order_number"])}</strong> is confirmed.</p>'
+        f'<table role="presentation" width="100%" style="margin:24px 0;font-size:14px">'
+        f'{rows}'
+        f'<tr><td style="padding:12px 0;font-weight:bold">Total</td><td style="padding:12px 0;text-align:right;font-weight:bold">₹{int(order["total"])}</td></tr>'
+        f'</table>'
+        f'<p style="font-size:13px;color:#6B7280">Shipping to {escape(order["address"]["line1"])}, {escape(order["address"]["city"])} {escape(order["address"]["pincode"])}.</p>'
+        f'<p style="font-size:12px;color:#6B7280;margin-top:32px">Sent by {escape(EMAIL_FROM_NAME)}. We never ask for your password or card details by email.</p>'
+        f'</td></tr></table>'
+    )
+
+
+def _shipping_email_html(order: dict) -> str:
+    return (
+        f'<table role="presentation" width="100%" style="background:#F9F8F6;font-family:Arial,sans-serif;color:#1A3A2F">'
+        f'<tr><td style="padding:32px 24px">'
+        f'<div style="font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:#C05A42">On its way</div>'
+        f'<h1 style="font-family:Georgia,serif;font-size:28px;margin:8px 0 16px">Your order has shipped.</h1>'
+        f'<p>Order <strong>{escape(order["order_number"])}</strong> is now on the way.</p>'
+        f'<p>Tracking ID: <strong>{escape(order.get("tracking_id") or "—")}</strong></p>'
+        f'<p style="font-size:12px;color:#6B7280;margin-top:32px">Sent by {escape(EMAIL_FROM_NAME)}. We never ask for your password or card details by email.</p>'
+        f'</td></tr></table>'
+    )
 
 app = FastAPI(title="NileNest API")
 api = APIRouter(prefix="/api")
@@ -622,6 +839,139 @@ async def checkout(req: CheckoutReq, user=Depends(get_current_user)):
     # clear cart
     await db.carts.update_one({"id": cart["id"]}, {"$set": {"items": [], "updated_at": now_iso()}})
     order.pop("_id", None)
+    # fire-and-forget order confirmation email
+    try:
+        await send_email(to=order["email"], subject=f"Your NileNest order {order['order_number']} is confirmed", html=_order_email_html(order))
+    except Exception as e:
+        log.warning(f"Confirmation email skipped: {e}")
+    return order
+
+
+# ---------- Razorpay ----------
+class RazorpayCreateReq(BaseModel):
+    cart_id: Optional[str] = None
+    coupon_code: Optional[str] = None
+    delivery_method: Literal["STANDARD", "EXPRESS"] = "STANDARD"
+
+
+class RazorpayVerifyReq(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    email: EmailStr
+    address: Address
+    coupon_code: Optional[str] = None
+    delivery_method: Literal["STANDARD", "EXPRESS"] = "STANDARD"
+    cart_id: Optional[str] = None
+
+
+@api.get("/config")
+async def get_config():
+    return {
+        "razorpay_enabled": RAZORPAY_ENABLED,
+        "razorpay_key_id": RAZORPAY_KEY_ID if RAZORPAY_ENABLED else None,
+        "email_enabled": bool(EMERGENT_EMAIL_KEY),
+        "storage_enabled": bool(EMERGENT_LLM_KEY),
+    }
+
+
+async def _compute_totals_for_cart(cart_id: Optional[str], user: Optional[dict], coupon_code: Optional[str], delivery_method: str):
+    cart = await get_or_create_cart(user["id"] if user else None, cart_id)
+    cart = await recalc_cart(cart)
+    if not cart["hydrated_items"]:
+        raise HTTPException(400, "Cart is empty")
+    coupon = None
+    if coupon_code:
+        coupon = await db.coupons.find_one({"code": coupon_code.upper().strip()}, {"_id": 0})
+    is_first = True
+    if user:
+        prior = await db.orders.count_documents({"user_id": user["id"]})
+        is_first = prior == 0
+    cres = apply_coupon(cart["subtotal"], coupon, is_first)
+    if cres["error"] and coupon:
+        raise HTTPException(400, cres["error"])
+    t = totals(cart["subtotal"], cres["discount"], cres["free_shipping"], delivery_method)
+    return cart, coupon, cres, t
+
+
+@api.post("/checkout/razorpay/create")
+async def rzp_create(req: RazorpayCreateReq, user=Depends(get_current_user)):
+    if not RAZORPAY_ENABLED or _rzp_client is None:
+        raise HTTPException(400, "Razorpay not configured")
+    cart, coupon, cres, t = await _compute_totals_for_cart(req.cart_id, user, req.coupon_code, req.delivery_method)
+    amount_paise = int(round(t["total"] * 100))
+    receipt = ("NN" + datetime.now().strftime("%y%m%d%H%M%S"))[:40]
+    try:
+        rzp_order = _rzp_client.order.create({
+            "amount": amount_paise, "currency": "INR", "receipt": receipt, "payment_capture": 1,
+        })
+    except Exception as e:
+        raise HTTPException(500, f"Razorpay order failed: {e}")
+    return {
+        "razorpay_order_id": rzp_order["id"],
+        "amount": amount_paise,
+        "currency": "INR",
+        "key_id": RAZORPAY_KEY_ID,
+        "subtotal": cart["subtotal"],
+        "discount": cres["discount"],
+        "shipping": t["shipping"],
+        "tax": t["tax"],
+        "total": t["total"],
+    }
+
+
+@api.post("/checkout/razorpay/verify")
+async def rzp_verify(req: RazorpayVerifyReq, user=Depends(get_current_user)):
+    if not RAZORPAY_ENABLED or _rzp_client is None:
+        raise HTTPException(400, "Razorpay not configured")
+    msg = f"{req.razorpay_order_id}|{req.razorpay_payment_id}".encode()
+    expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, req.razorpay_signature):
+        raise HTTPException(400, "Invalid payment signature")
+    cart, coupon, cres, t = await _compute_totals_for_cart(req.cart_id, user, req.coupon_code, req.delivery_method)
+    # decrement stock
+    for item in cart["hydrated_items"]:
+        await db.products.update_one(
+            {"id": item["product_id"], "variants.id": item["variant_id"]},
+            {"$inc": {"variants.$.stock": -item["quantity"]}},
+        )
+        prod = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
+        if prod:
+            for v in prod["variants"]:
+                v["stock_state"] = stock_state(v["stock"])
+            await db.products.update_one({"id": prod["id"]}, {"$set": {"variants": prod["variants"]}})
+    order = {
+        "id": new_id(),
+        "order_number": "NN" + datetime.now().strftime("%y%m%d") + new_id()[:4].upper(),
+        "user_id": user["id"] if user else None,
+        "email": req.email.lower(),
+        "address": req.address.model_dump(),
+        "items": cart["hydrated_items"],
+        "subtotal": cart["subtotal"],
+        "mrp_total": cart["mrp_total"],
+        "savings": cart["savings"],
+        "discount": cres["discount"],
+        "coupon_code": coupon["code"] if coupon else None,
+        "shipping": t["shipping"],
+        "tax": t["tax"],
+        "total": t["total"],
+        "delivery_method": req.delivery_method,
+        "payment_method": "RAZORPAY",
+        "payment_status": "PAID",
+        "razorpay_order_id": req.razorpay_order_id,
+        "razorpay_payment_id": req.razorpay_payment_id,
+        "status": "PLACED",
+        "tracking_id": None,
+        "timeline": [{"status": "PLACED", "at": now_iso(), "note": "Payment received"}],
+        "created_at": now_iso(),
+    }
+    await db.orders.insert_one(order.copy())
+    await db.carts.update_one({"id": cart["id"]}, {"$set": {"items": [], "updated_at": now_iso()}})
+    order.pop("_id", None)
+    try:
+        await send_email(to=order["email"], subject=f"Your NileNest order {order['order_number']} is confirmed", html=_order_email_html(order))
+    except Exception as e:
+        log.warning(f"Confirmation email skipped: {e}")
     return order
 
 
@@ -876,9 +1226,51 @@ async def admin_update_order(order_id: str, upd: OrderStatusUpdate, user=Depends
     upd_dict = {"status": upd.status, "timeline": order["timeline"]}
     if upd.tracking_id:
         upd_dict["tracking_id"] = upd.tracking_id
+        order["tracking_id"] = upd.tracking_id
     await db.orders.update_one({"id": order_id}, {"$set": upd_dict})
     await audit(user["id"], "order.update", order_id, {"status": upd.status})
+    # Send shipping email on SHIPPED
+    if upd.status == "SHIPPED" and order.get("email"):
+        try:
+            order["status"] = "SHIPPED"
+            await send_email(to=order["email"], subject=f"Your NileNest order {order['order_number']} has shipped", html=_shipping_email_html(order))
+        except Exception as e:
+            log.warning(f"Shipping email skipped: {e}")
     return {"ok": True}
+
+
+# ---------- Admin upload (object storage) ----------
+@api.post("/admin/upload")
+async def admin_upload(file: UploadFile = File(...), user=Depends(require_admin)):
+    ext = (file.filename or "bin").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+        raise HTTPException(400, "Only image files (jpg, png, webp, gif) allowed")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Max 5MB")
+    path = f"{APP_NAME}/products/{new_id()}.{ext}"
+    ct = file.content_type or f"image/{ 'jpeg' if ext=='jpg' else ext }"
+    result = put_object(path, data, ct)
+    await db.files.insert_one({
+        "id": new_id(),
+        "storage_path": result["path"],
+        "original_filename": file.filename,
+        "content_type": ct,
+        "size": result.get("size", len(data)),
+        "uploaded_by": user["id"],
+        "is_deleted": False,
+        "created_at": now_iso(),
+    })
+    return {"path": result["path"], "url": f"/api/files/{result['path']}"}
+
+
+@api.get("/files/{path:path}")
+async def serve_file(path: str):
+    record = await db.files.find_one({"storage_path": path, "is_deleted": False})
+    if not record:
+        raise HTTPException(404, "File not found")
+    data, ct = get_object(path)
+    return Response(content=data, media_type=record.get("content_type", ct))
 
 
 @api.post("/admin/products")
@@ -1303,6 +1695,13 @@ async def on_startup():
         log.info("Seed complete")
     except Exception as e:
         log.exception(f"Seed failed: {e}")
+    # storage init (non-blocking failure)
+    try:
+        if EMERGENT_LLM_KEY:
+            init_storage()
+            log.info("Storage initialized")
+    except Exception as e:
+        log.warning(f"Storage init failed: {e}")
 
 
 app.include_router(api)

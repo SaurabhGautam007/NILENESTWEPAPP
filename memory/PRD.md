@@ -57,11 +57,13 @@ Premium D2C wellness FMCG platform for a premium Indian brand launching with 2 S
 - Audit log
 
 ## Prioritised backlog (post v1)
-### P0
-- Real Razorpay integration (test mode + live)
-- Resend transactional email (order confirm, shipping updates)
-- Product image upload via Emergent object storage from admin
-### P1
+### Iteration 2 (Feb 2026) — DONE
+- ✅ Razorpay integration: `/api/config`, `/api/checkout/razorpay/create`, `/api/checkout/razorpay/verify` (HMAC signature verified). Checkout auto-switches to Razorpay when RAZORPAY_KEY_ID/SECRET are set in `.env`. Frontend loads checkout.razorpay.com SDK on demand.
+- ✅ Admin image upload via Emergent object storage: `/api/admin/upload` + `/api/files/{path}` server proxy; admin Catalog tab has upload widget with preview and remove.
+- ✅ Order emails via Emergent-managed Resend with full guardrail gate (`_assert_safe_email`): confirmation email on `/api/checkout` and `/api/checkout/razorpay/verify`; shipping email on admin SHIPPED transition. Gracefully skips on failure so orders never break.
+- ✅ Concierge context awareness: `AIContext` React context; PDP registers current product_id; AIChat forwards it as `context_product_id` and shows "Talking about the product you're viewing" label; PDP has an explicit "Ask the concierge about this product" CTA.
+
+### P1 (open)
 - OTP auth (MSG91/Twilio) as alternative sign-in
 - Live shipping adapter (Shiprocket/Delhivery) + pincode serviceability
 - Subscriptions & B2B pricing tier

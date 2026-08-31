@@ -3,9 +3,10 @@ import { useParams, Link } from "react-router-dom";
 import { api, money } from "@/lib/api";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useCart } from "@/context/CartContext";
+import { useAIContext } from "@/context/AIContext";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
-import { Star, Leaf, Shield, Truck } from "lucide-react";
+import { Star, Leaf, Shield, Truck, Sparkles } from "lucide-react";
 
 export default function Product() {
   const { slug } = useParams();
@@ -13,13 +14,16 @@ export default function Product() {
   const [variantId, setVariantId] = useState(null);
   const [imgIdx, setImgIdx] = useState(0);
   const { add } = useCart();
+  const ai = useAIContext();
 
   useEffect(() => {
     api.get(`/products/${slug}`).then((r) => {
       setProduct(r.data);
       setVariantId(r.data.variants?.[0]?.id);
       setImgIdx(0);
+      ai?.setProduct(r.data.id);
     });
+    return () => ai?.setProduct(null);
   }, [slug]);
 
   if (!product) return <div className="container-nl py-24 text-center text-muted-foreground">Loading…</div>;
@@ -101,6 +105,10 @@ export default function Product() {
             disabled={variant.stock_state === "OUT_OF_STOCK"}
             className="btn-primary w-full mt-6 disabled:opacity-40">
             Add to basket · {money(variant.price)}
+          </button>
+          <button onClick={() => ai?.open()} data-testid="pdp-ask-concierge"
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 text-sm text-secondary hover:text-secondary/80 py-2">
+            <Sparkles className="w-4 h-4" /> Ask the concierge about this product
           </button>
 
           <div className="grid grid-cols-3 gap-3 mt-8 pt-8 border-t border-border/60 text-xs">

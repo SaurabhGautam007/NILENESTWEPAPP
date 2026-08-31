@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { MessageCircle, X, Send } from "lucide-react";
 import { BACKEND } from "@/lib/api";
 import { TID } from "@/constants/testIds";
-import { useLocation } from "react-router-dom";
+import { useAIContext } from "@/context/AIContext";
 
 export default function AIChat() {
   const [open, setOpen] = useState(false);
@@ -13,8 +13,11 @@ export default function AIChat() {
   const [sending, setSending] = useState(false);
   const [sessionId] = useState(() => `s-${Math.random().toString(36).slice(2, 10)}`);
   const scrollRef = useRef(null);
-  const { pathname } = useLocation();
-  const contextProductId = useRef(null);
+  const ai = useAIContext();
+
+  useEffect(() => {
+    if (ai) ai.registerOpener(() => setOpen(true));
+  }, [ai]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
@@ -30,7 +33,7 @@ export default function AIChat() {
       const resp = await fetch(`${BACKEND}/api/ai/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, session_id: sessionId, context_product_id: contextProductId.current }),
+        body: JSON.stringify({ message: text, session_id: sessionId, context_product_id: ai?.getProduct() || null }),
       });
       if (!resp.ok || !resp.body) throw new Error("Chat failed");
       const reader = resp.body.getReader();
@@ -64,6 +67,8 @@ export default function AIChat() {
     }
   };
 
+  const contextLabel = ai?.getProduct() ? "Talking about the product you're viewing" : "Grounded on NileNest";
+
   return (
     <>
       <button data-testid={TID.ai.fab} onClick={() => setOpen(true)}
@@ -76,7 +81,7 @@ export default function AIChat() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
             <div>
               <div className="font-display text-lg">Concierge</div>
-              <div className="text-[10px] tracking-widest uppercase text-muted-foreground">Grounded on NileNest</div>
+              <div className="text-[10px] tracking-widest uppercase text-muted-foreground">{contextLabel}</div>
             </div>
             <button onClick={() => setOpen(false)} className="p-1 hover:bg-accent rounded-full"><X className="w-4 h-4" /></button>
           </div>
