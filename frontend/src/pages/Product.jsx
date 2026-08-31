@@ -7,6 +7,7 @@ import { useAIContext } from "@/context/AIContext";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 import { Star, Leaf, Shield, Truck, Sparkles } from "lucide-react";
+import Reviews from "@/components/Reviews";
 
 export default function Product() {
   const { slug } = useParams();
@@ -64,12 +65,18 @@ export default function Product() {
           <h1 data-testid={TID.product.title} className="font-display text-4xl sm:text-5xl mt-3 leading-tight">{product.title}</h1>
 
           <div className="flex items-center gap-3 mt-4 text-sm">
-            <div className="flex items-center gap-1">
-              {[...Array(5)].map((_, i) => (
-                <Star key={i} className={`w-4 h-4 ${i < Math.round(product.rating_avg) ? "fill-secondary text-secondary" : "text-border"}`} />
-              ))}
-            </div>
-            <span className="text-muted-foreground">{product.rating_avg} · {product.rating_count} reviews</span>
+            {product.rating_count > 0 ? (
+              <>
+                <div className="flex items-center gap-1">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className={`w-4 h-4 ${i < Math.round(product.rating_avg) ? "fill-secondary text-secondary" : "text-border"}`} />
+                  ))}
+                </div>
+                <a href="#reviews" className="text-muted-foreground link-underline">{product.rating_avg} · {product.rating_count} verified review{product.rating_count !== 1 ? "s" : ""}</a>
+              </>
+            ) : (
+              <span className="text-xs text-muted-foreground">Be the first to review</span>
+            )}
           </div>
 
           <div className="mt-6 flex items-baseline gap-3">
@@ -184,6 +191,12 @@ export default function Product() {
           <p className="lg:col-span-7 text-lg leading-relaxed text-muted-foreground">{product.story}</p>
         </div>
       )}
+
+      <div id="reviews">
+        <Reviews product={product} onReviewAdded={() => {
+          api.get(`/products/${slug}`).then((r) => setProduct(r.data));
+        }} />
+      </div>
     </section>
   );
 }

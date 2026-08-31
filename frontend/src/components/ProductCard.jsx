@@ -6,6 +6,7 @@ import { TID } from "@/constants/testIds";
 export default function ProductCard({ product }) {
   const v = product.variants?.[0];
   const discount = v?.mrp && v.price < v.mrp ? Math.round((1 - v.price / v.mrp) * 100) : 0;
+  const hasReviews = product.rating_count > 0;
   return (
     <Link to={`/product/${product.slug}`} data-testid={TID.product.card(product.slug)} className="group block">
       <div className="relative overflow-hidden bg-muted aspect-[4/5] mb-3">
@@ -29,6 +30,13 @@ export default function ProductCard({ product }) {
           <span className="font-medium">{money(v?.price)}</span>
           {v?.mrp > v?.price && <span className="text-muted-foreground line-through text-xs">{money(v.mrp)}</span>}
         </div>
+        {hasReviews && (
+          <div className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
+            <span className="text-secondary">★</span>
+            <span>{product.rating_avg}</span>
+            <span className="opacity-60">({product.rating_count})</span>
+          </div>
+        )}
       </div>
     </Link>
   );

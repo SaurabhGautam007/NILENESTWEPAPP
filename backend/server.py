@@ -693,10 +693,15 @@ async def get_product(slug: str):
     product = await db.products.find_one({"slug": slug}, {"_id": 0})
     if not product:
         raise HTTPException(404, "Product not found")
-    reviews = await db.reviews.find({"product_id": product["id"]}, {"_id": 0}).to_list(50)
+    reviews = await db.reviews.find({"product_id": product["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
     product["reviews"] = reviews
-    product["rating_avg"] = round(sum(r["rating"] for r in reviews) / len(reviews), 1) if reviews else 4.8
-    product["rating_count"] = len(reviews) if reviews else 24
+    product["rating_avg"] = round(sum(r["rating"] for r in reviews) / len(reviews), 1) if reviews else 0
+    product["rating_count"] = len(reviews)
+    # rating breakdown 5..1
+    breakdown = {str(i): 0 for i in range(1, 6)}
+    for r in reviews:
+        breakdown[str(int(r["rating"]))] = breakdown.get(str(int(r["rating"])), 0) + 1
+    product["rating_breakdown"] = breakdown
     return product
 
 
@@ -1025,25 +1030,60 @@ async def get_cms(key: str):
 
 
 # ---------- reviews ----------
-@api.post("/reviews")
-async def create_review(review: Dict[str, Any], user=Depends(require_user)):
+class ReviewIn(BaseModel):
+    product_id: str
+    rating: int = Field(ge=1, le=5)
+    title: Optional[str] = ""
+    body: str = Field(min_length=4, max_length=2000)
+
+
+@api.get("/reviews/eligibility")
+async def review_eligibility(product_id: str, user=Depends(require_user)):
     has_order = await db.orders.find_one(
-        {"user_id": user["id"], "items.product_id": review["product_id"]}
+        {"user_id": user["id"], "items.product_id": product_id,
+         "status": {"$nin": ["CANCELLED", "REFUNDED"]}}
     )
+    has_reviewed = await db.reviews.find_one({"product_id": product_id, "user_id": user["id"]})
+    return {
+        "verified_purchase": bool(has_order),
+        "has_reviewed": bool(has_reviewed),
+        "can_review": bool(has_order) and not bool(has_reviewed),
+    }
+
+
+@api.post("/reviews")
+async def create_review(review: ReviewIn, user=Depends(require_user)):
+    # Verified buyers only
+    has_order = await db.orders.find_one(
+        {"user_id": user["id"], "items.product_id": review.product_id,
+         "status": {"$nin": ["CANCELLED", "REFUNDED"]}}
+    )
+    if not has_order:
+        raise HTTPException(403, "Only verified buyers can review this product")
+    # One review per user per product
+    existing = await db.reviews.find_one({"product_id": review.product_id, "user_id": user["id"]})
+    if existing:
+        raise HTTPException(400, "You have already reviewed this product")
     r = {
         "id": new_id(),
-        "product_id": review["product_id"],
+        "product_id": review.product_id,
         "user_id": user["id"],
         "user_name": user["name"],
-        "rating": int(review["rating"]),
-        "title": review.get("title", ""),
-        "body": review["body"],
-        "verified_purchase": bool(has_order),
+        "rating": review.rating,
+        "title": review.title or "",
+        "body": review.body,
+        "verified_purchase": True,
         "created_at": now_iso(),
     }
     await db.reviews.insert_one(r.copy())
     r.pop("_id", None)
     return r
+
+
+@api.get("/reviews")
+async def list_product_reviews(product_id: str):
+    reviews = await db.reviews.find({"product_id": product_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return reviews
 
 
 # ---------- AI Assistant (Gemini via Emergent) ----------

@@ -57,6 +57,11 @@ Premium D2C wellness FMCG platform for a premium Indian brand launching with 2 S
 - Audit log
 
 ## Prioritised backlog (post v1)
+### Iteration 3 (Feb 2026) — DONE
+- ✅ **Verified-buyer reviews**: `POST /api/reviews` enforces verified purchase (403 otherwise) and prevents duplicate reviews per user/product; `GET /api/reviews/eligibility` powers frontend state; product endpoint returns rating_avg, rating_count, and rating_breakdown (5..1) computed live from real reviews (no more placeholder rating).
+- ✅ **PDP reviews section**: Star breakdown bars, verified badge, elegant list, contextual write-review form that only appears for eligible buyers; graceful states for signed-out / not-yet-purchased / already-reviewed.
+- ✅ **Product card rating**: Shows real star + count on shop/home grids when reviews exist.
+
 ### Iteration 2 (Feb 2026) — DONE
 - ✅ Razorpay integration: `/api/config`, `/api/checkout/razorpay/create`, `/api/checkout/razorpay/verify` (HMAC signature verified). Checkout auto-switches to Razorpay when RAZORPAY_KEY_ID/SECRET are set in `.env`. Frontend loads checkout.razorpay.com SDK on demand.
 - ✅ Admin image upload via Emergent object storage: `/api/admin/upload` + `/api/files/{path}` server proxy; admin Catalog tab has upload widget with preview and remove.
