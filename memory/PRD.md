@@ -57,6 +57,12 @@ Premium D2C wellness FMCG platform for a premium Indian brand launching with 2 S
 - Audit log
 
 ## Prioritised backlog (post v1)
+### Iteration 4 (Feb 2026) — DONE
+- ✅ **NileNest Wellness Guide** (AI): Rewrote system prompt into a family-oriented wellness guide. Enforces the loop: understand → ask 1-3 questions → educate → discuss ingredients/nutrients → only then connect to a NileNest product (if any fit) → set realistic expectations. Refuses "burn belly fat", "detox", "cure X" claims. Escalates safety cases (pregnancy, prescription meds, severe symptoms).
+- ✅ **Rich product grounding**: `build_ai_context` now feeds full description, ingredients, nutrition per serving, certifications, transparency to the model so no hallucination.
+- ✅ **Warmer widget**: Renamed to "Wellness Guide", starter-prompt chips (hair thinning, sustainable fat loss, evening calm, ingredient education), plain-language footer disclaimer ("Educational guidance only — not medical advice").
+- ✅ **Homepage recommender** rewritten to sit in the same wellness voice: may return 0 products with a lifestyle-first message when nothing fits.
+
 ### Iteration 3 (Feb 2026) — DONE
 - ✅ **Verified-buyer reviews**: `POST /api/reviews` enforces verified purchase (403 otherwise) and prevents duplicate reviews per user/product; `GET /api/reviews/eligibility` powers frontend state; product endpoint returns rating_avg, rating_count, and rating_breakdown (5..1) computed live from real reviews (no more placeholder rating).
 - ✅ **PDP reviews section**: Star breakdown bars, verified badge, elegant list, contextual write-review form that only appears for eligible buyers; graceful states for signed-out / not-yet-purchased / already-reviewed.
