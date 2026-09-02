@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Header, Query, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, UploadFile, File, Header, Query, Response
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -212,49 +212,114 @@ async def send_email(*, to: str, subject: str, html: str, reply_to: Optional[str
 
 EMAIL_LOGO_URL = "https://customer-assets-m6fa6gv7.emergentagent.net/job_ayur-cart-2/artifacts/052dhc41_logo.png"
 
-EMAIL_LOGO_HEADER = (
-    '<table role="presentation" width="100%" style="background:#F9F8F6;padding:32px 0 16px 0">'
-    '<tr><td align="center">'
-    f'<img src="{EMAIL_LOGO_URL}" alt="NileNest" width="160" style="display:block;margin:0 auto;max-width:160px;height:auto"/>'
-    '</td></tr></table>'
-)
+
+def _email_shell(subject_hint: str, body_html: str) -> str:
+    """Consistent NileNest transactional email shell — logo, brand accents, footer."""
+    return (
+        '<div style="background:#F9F8F6;padding:24px 0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif;color:#1A3A2F">'
+        '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:600px;margin:0 auto;background:#FFFFFF;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.04)">'
+        '<tr><td align="center" style="padding:32px 24px 8px 24px">'
+        f'<img src="{EMAIL_LOGO_URL}" alt="NileNest" width="140" style="display:block;max-width:140px;height:auto"/>'
+        '</td></tr>'
+        f'<tr><td style="padding:8px 32px 32px 32px">{body_html}</td></tr>'
+        '<tr><td style="background:#EBE9E4;padding:22px 32px;font-size:12px;color:#5A6A63">'
+        '<div style="font-family:Georgia,serif;font-size:14px;color:#1A3A2F;margin-bottom:6px">NileNest</div>'
+        'Premium wellness essentials, traceable to a farm, a harvest, and a hand.<br/>'
+        f'<a href="mailto:{escape(EMAIL_REPLY_TO or "care@nilenest.in")}" style="color:#8B1B1F;text-decoration:none">'
+        f'{escape(EMAIL_REPLY_TO or "care@nilenest.in")}</a> · India-only shipping · FSSAI · India Organic · GMP'
+        '</td></tr></table>'
+        '<div style="max-width:600px;margin:12px auto 0;text-align:center;font-size:11px;color:#8B8B8B;padding:0 24px">'
+        'We never ask for your password or card details by email.'
+        '</div></div>'
+    )
+
+
+def _order_items_table(order: dict) -> str:
+    rows = ""
+    for i in order["items"]:
+        img = escape(i.get("image", ""))
+        img_cell = (f'<td width="64" style="padding-right:12px"><img src="{img}" alt="" width="56" height="56" '
+                    f'style="display:block;width:56px;height:56px;object-fit:cover;border-radius:6px"/></td>') if img else ''
+        rows += (
+            f'<tr>{img_cell}<td style="padding:10px 0;border-bottom:1px solid #EBE9E4;font-size:14px">'
+            f'<div style="color:#1A3A2F">{escape(i["title"])}</div>'
+            f'<div style="color:#8B8B8B;font-size:12px">{escape(i["variant_name"])} × {i["quantity"]}</div>'
+            f'</td><td align="right" style="padding:10px 0;border-bottom:1px solid #EBE9E4;font-size:14px;color:#1A3A2F">₹{int(i["line_total"])}</td></tr>'
+        )
+    totals = f'''
+      <tr><td colspan="2" style="padding-top:14px;font-size:13px;color:#5A6A63">Subtotal</td>
+          <td align="right" style="padding-top:14px;font-size:13px">₹{int(order["subtotal"])}</td></tr>'''
+    if order.get("discount", 0) > 0:
+        totals += f'<tr><td colspan="2" style="font-size:13px;color:#8B1B1F">Discount ({escape(order.get("coupon_code") or "")})</td><td align="right" style="font-size:13px;color:#8B1B1F">-₹{int(order["discount"])}</td></tr>'
+    ship_val = "Free" if order.get("shipping", 0) == 0 else f"₹{int(order['shipping'])}"
+    totals += f'<tr><td colspan="2" style="font-size:13px;color:#5A6A63">Shipping</td><td align="right" style="font-size:13px">{ship_val}</td></tr>'
+    if order.get("tax", 0) > 0:
+        totals += f'<tr><td colspan="2" style="font-size:13px;color:#5A6A63">Tax</td><td align="right" style="font-size:13px">₹{int(order["tax"])}</td></tr>'
+    totals += f'<tr><td colspan="2" style="padding-top:8px;font-size:16px;font-family:Georgia,serif;color:#1A3A2F;border-top:1px solid #EBE9E4">Total</td><td align="right" style="padding-top:8px;font-size:16px;font-family:Georgia,serif;color:#1A3A2F;border-top:1px solid #EBE9E4">₹{int(order["total"])}</td></tr>'
+    return f'<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:16px 0">{rows}{totals}</table>'
+
+
+def _address_block(order: dict) -> str:
+    a = order["address"]
+    line2 = f'<div>{escape(a.get("line2",""))}</div>' if a.get("line2") else ''
+    return (
+        '<div style="background:#F5F4EF;padding:14px 16px;border-radius:8px;font-size:13px;line-height:1.55;color:#1A3A2F;margin:8px 0 4px 0">'
+        f'<div style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:#8B1B1F;margin-bottom:6px">Shipping to</div>'
+        f'<div><strong>{escape(a["name"])}</strong></div>'
+        f'<div>{escape(a["line1"])}</div>{line2}'
+        f'<div>{escape(a["city"])}, {escape(a["state"])} {escape(a["pincode"])}</div>'
+        f'<div style="color:#5A6A63;margin-top:4px">{escape(a["phone"])}</div>'
+        '</div>'
+    )
+
+
+def _cta_button(label: str, href: str) -> str:
+    return (
+        f'<div style="margin:22px 0 6px 0"><a href="{escape(href)}" '
+        f'style="display:inline-block;background:#1A3A2F;color:#F9F8F6;text-decoration:none;'
+        f'padding:12px 28px;border-radius:999px;font-size:14px;font-weight:500">{escape(label)}</a></div>'
+    )
+
+
+STATUS_COPY = {
+    "PLACED":     {"overline": "Order confirmed",   "headline": "Thank you, {first}.",              "message": "Your NileNest order <strong>#{num}</strong> is confirmed. We'll start preparing it with care today."},
+    "PACKED":     {"overline": "Packed with care",  "headline": "Your order is packed, {first}.",   "message": "Your NileNest order <strong>#{num}</strong> is packed and handed off to our courier partner."},
+    "SHIPPED":    {"overline": "On its way",        "headline": "Your NileNest is on the way.",     "message": "Order <strong>#{num}</strong> is now travelling to your door."},
+    "DELIVERED":  {"overline": "Delivered",         "headline": "Delivered with love, {first}.",    "message": "Order <strong>#{num}</strong> has been delivered. We hope it becomes part of your everyday ritual."},
+    "CANCELLED":  {"overline": "Order cancelled",   "headline": "Your order has been cancelled.",   "message": "Order <strong>#{num}</strong> has been cancelled. If you didn't request this, please reply to this email and we'll help right away."},
+    "REFUNDED":   {"overline": "Refund initiated",  "headline": "Your refund is on the way.",       "message": "The refund for order <strong>#{num}</strong> has been initiated. Depending on your bank, it may take 5–7 business days to reflect."},
+}
+
+
+def _status_email_html(order: dict, status: str) -> str:
+    copy = STATUS_COPY.get(status, STATUS_COPY["PLACED"])
+    first = order["address"]["name"].split()[0] if order.get("address", {}).get("name") else "friend"
+    num = order["order_number"]
+    payment = order.get("payment_status", "")
+    payment_line = f'<div style="font-size:12px;color:#5A6A63;margin-top:6px">Payment: <strong style="color:#1A3A2F">{escape(payment)}</strong> · {escape(order.get("payment_method",""))}</div>' if payment else ''
+    tracking = ''
+    if status in ("SHIPPED", "OUT_FOR_DELIVERY") and order.get("tracking_id"):
+        tracking = f'<div style="font-size:13px;margin:14px 0"><span style="color:#5A6A63">Tracking ID:</span> <strong>{escape(order["tracking_id"])}</strong></div>'
+    cta = _cta_button("Track your order", f"https://nilenest.in/track/{num}") if status not in ("CANCELLED", "REFUNDED") else ''
+    body = (
+        f'<div style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#8B1B1F;margin-top:8px">{copy["overline"]}</div>'
+        f'<h1 style="font-family:Georgia,\'Times New Roman\',serif;font-size:26px;line-height:1.25;margin:8px 0 12px 0;color:#1A3A2F;font-weight:500">{escape(copy["headline"].format(first=first))}</h1>'
+        f'<p style="font-size:14px;line-height:1.6;color:#3B4A44;margin:0 0 4px 0">{copy["message"].format(num=escape(num))}</p>'
+        f'{payment_line}{tracking}'
+        f'{_order_items_table(order)}'
+        f'{_address_block(order)}'
+        f'{cta}'
+        f'<p style="font-size:13px;color:#5A6A63;margin-top:26px">Thank you for choosing NileNest — we\'re happy to be a small part of your wellness journey.</p>'
+    )
+    return _email_shell(status, body)
 
 
 def _order_email_html(order: dict) -> str:
-    rows = "".join(
-        f'<tr><td style="padding:8px 0;border-bottom:1px solid #EBE9E4">{escape(i["title"])} — {escape(i["variant_name"])} × {i["quantity"]}</td>'
-        f'<td style="padding:8px 0;border-bottom:1px solid #EBE9E4;text-align:right">₹{int(i["line_total"])}</td></tr>'
-        for i in order["items"]
-    )
-    return (
-        EMAIL_LOGO_HEADER +
-        f'<table role="presentation" width="100%" style="background:#F9F8F6;font-family:Arial,sans-serif;color:#1A3A2F">'
-        f'<tr><td style="padding:8px 24px 32px 24px">'
-        f'<div style="font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:#C05A42">Order confirmed</div>'
-        f'<h1 style="font-family:Georgia,serif;font-size:28px;margin:8px 0 24px">Thank you, {escape(order["address"]["name"].split()[0])}.</h1>'
-        f'<p>Your NileNest order <strong>{escape(order["order_number"])}</strong> is confirmed.</p>'
-        f'<table role="presentation" width="100%" style="margin:24px 0;font-size:14px">'
-        f'{rows}'
-        f'<tr><td style="padding:12px 0;font-weight:bold">Total</td><td style="padding:12px 0;text-align:right;font-weight:bold">₹{int(order["total"])}</td></tr>'
-        f'</table>'
-        f'<p style="font-size:13px;color:#6B7280">Shipping to {escape(order["address"]["line1"])}, {escape(order["address"]["city"])} {escape(order["address"]["pincode"])}.</p>'
-        f'<p style="font-size:12px;color:#6B7280;margin-top:32px">Sent by {escape(EMAIL_FROM_NAME)}. We never ask for your password or card details by email.</p>'
-        f'</td></tr></table>'
-    )
+    return _status_email_html(order, order.get("status", "PLACED"))
 
 
 def _shipping_email_html(order: dict) -> str:
-    return (
-        EMAIL_LOGO_HEADER +
-        f'<table role="presentation" width="100%" style="background:#F9F8F6;font-family:Arial,sans-serif;color:#1A3A2F">'
-        f'<tr><td style="padding:8px 24px 32px 24px">'
-        f'<div style="font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:#C05A42">On its way</div>'
-        f'<h1 style="font-family:Georgia,serif;font-size:28px;margin:8px 0 16px">Your order has shipped.</h1>'
-        f'<p>Order <strong>{escape(order["order_number"])}</strong> is now on the way.</p>'
-        f'<p>Tracking ID: <strong>{escape(order.get("tracking_id") or "—")}</strong></p>'
-        f'<p style="font-size:12px;color:#6B7280;margin-top:32px">Sent by {escape(EMAIL_FROM_NAME)}. We never ask for your password or card details by email.</p>'
-        f'</td></tr></table>'
-    )
+    return _status_email_html(order, "SHIPPED")
 
 app = FastAPI(title="NileNest API")
 api = APIRouter(prefix="/api")
@@ -1369,9 +1434,35 @@ async def admin_update_order(order_id: str, upd: OrderStatusUpdate, user=Depends
     if upd.status == "SHIPPED" and order.get("email"):
         try:
             order["status"] = "SHIPPED"
-            await send_email(to=order["email"], subject=f"Your NileNest order {order['order_number']} has shipped", html=_shipping_email_html(order))
+            await send_email(to=order["email"],
+                             subject=f"NileNest — Your order #{order['order_number']} is on its way",
+                             html=_status_email_html(order, "SHIPPED"))
         except Exception as e:
             log.warning(f"Shipping email skipped: {e}")
+    elif upd.status == "DELIVERED" and order.get("email"):
+        try:
+            order["status"] = "DELIVERED"
+            await send_email(to=order["email"],
+                             subject=f"NileNest — Order #{order['order_number']} delivered",
+                             html=_status_email_html(order, "DELIVERED"))
+        except Exception as e:
+            log.warning(f"Delivery email skipped: {e}")
+    elif upd.status == "CANCELLED" and order.get("email"):
+        try:
+            order["status"] = "CANCELLED"
+            await send_email(to=order["email"],
+                             subject=f"NileNest — Order #{order['order_number']} cancelled",
+                             html=_status_email_html(order, "CANCELLED"))
+        except Exception as e:
+            log.warning(f"Cancellation email skipped: {e}")
+    elif upd.status == "REFUNDED" and order.get("email"):
+        try:
+            order["status"] = "REFUNDED"
+            await send_email(to=order["email"],
+                             subject=f"NileNest — Refund initiated for order #{order['order_number']}",
+                             html=_status_email_html(order, "REFUNDED"))
+        except Exception as e:
+            log.warning(f"Refund email skipped: {e}")
     return {"ok": True}
 
 
