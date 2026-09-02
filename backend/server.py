@@ -506,6 +506,24 @@ class OrderStatusUpdate(BaseModel):
     tracking_id: Optional[str] = None
 
 
+class ShipmentUpdate(BaseModel):
+    """Admin manual set / update of shipment fields on an order."""
+    courier_slug: Optional[str] = None
+    courier_name: Optional[str] = None
+    shipment_id: Optional[str] = None
+    awb: Optional[str] = None
+    tracking_url: Optional[str] = None
+    shipment_status: Optional[str] = None
+    eta: Optional[str] = None
+
+
+class TrackingEventIn(BaseModel):
+    status: str
+    note: Optional[str] = ""
+    location: Optional[str] = ""
+    at: Optional[str] = None
+
+
 class Article(BaseModel):
     id: str = Field(default_factory=new_id)
     slug: str
@@ -1414,6 +1432,239 @@ async def admin_stats(user=Depends(require_admin)):
 @api.get("/admin/orders")
 async def admin_orders(user=Depends(require_admin)):
     return await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+# ---------- SHIPPING PROVIDER LAYER (provider-independent) ----------
+# Abstract base + registry so any real courier (Shiprocket, Delhivery, Bluedart, DTDC…)
+# can be added later without touching the customer-facing tracking flow.
+
+INTERNAL_TIMELINE = [
+    "PLACED", "PROCESSING", "PACKED", "SHIPPED", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"
+]
+
+
+class ShippingProvider:
+    """Contract every courier adapter must implement."""
+    slug: str = "base"
+    display_name: str = "Base"
+
+    def is_serviceable(self, pincode: str) -> bool:
+        return True
+
+    async def create_shipment(self, order: dict) -> dict:
+        raise NotImplementedError
+
+    async def get_tracking(self, awb: str) -> dict:
+        raise NotImplementedError
+
+    def map_status(self, raw_status: str) -> str:
+        """Map courier-specific status → NileNest internal timeline status."""
+        s = (raw_status or "").upper()
+        table = {
+            "MANIFESTED": "PACKED", "READY TO SHIP": "PACKED",
+            "PICKED UP": "SHIPPED", "PICKED": "SHIPPED", "DISPATCHED": "SHIPPED",
+            "IN TRANSIT": "IN_TRANSIT", "IN-TRANSIT": "IN_TRANSIT", "TRANSIT": "IN_TRANSIT",
+            "OUT FOR DELIVERY": "OUT_FOR_DELIVERY", "OFD": "OUT_FOR_DELIVERY",
+            "DELIVERED": "DELIVERED", "COMPLETED": "DELIVERED",
+            "RTO": "CANCELLED", "CANCELLED": "CANCELLED", "CANCELED": "CANCELLED",
+        }
+        return table.get(s, s or "SHIPPED")
+
+
+class ManualProvider(ShippingProvider):
+    """Default fallback provider. Admin sets AWB/URL/status by hand.
+    Used until a real courier is configured with API credentials."""
+    slug = "manual"
+    display_name = "Manual (Admin)"
+
+    async def create_shipment(self, order: dict) -> dict:
+        return {"awb": None, "tracking_url": None, "shipment_id": None, "provider": self.slug}
+
+    async def get_tracking(self, awb: str) -> dict:
+        return {"events": [], "status": None, "eta": None}
+
+
+class ShippingRegistry:
+    """Registry so new providers can be added in one place. Provider selected by pincode/config."""
+    def __init__(self):
+        self._providers: Dict[str, ShippingProvider] = {}
+        self.default_slug = "manual"
+
+    def register(self, provider: ShippingProvider):
+        self._providers[provider.slug] = provider
+
+    def get(self, slug: Optional[str] = None) -> ShippingProvider:
+        return self._providers.get(slug or self.default_slug) or self._providers["manual"]
+
+    def pick_for_pincode(self, pincode: str) -> ShippingProvider:
+        for p in self._providers.values():
+            if p.slug != "manual" and p.is_serviceable(pincode):
+                return p
+        return self._providers["manual"]
+
+    def list(self) -> List[Dict[str, str]]:
+        return [{"slug": p.slug, "name": p.display_name} for p in self._providers.values()]
+
+
+shipping_registry = ShippingRegistry()
+shipping_registry.register(ManualProvider())
+
+
+@api.get("/shipping/providers")
+async def list_shipping_providers():
+    return shipping_registry.list()
+
+
+def _serviceable_pincode(pincode: str) -> bool:
+    """Basic serviceability stub — real providers will call their API. India pincodes are 6 digits."""
+    return bool(pincode and len(pincode) == 6 and pincode.isdigit())
+
+
+@api.get("/shipping/serviceability")
+async def check_serviceability(pincode: str):
+    ok = _serviceable_pincode(pincode)
+    provider = shipping_registry.pick_for_pincode(pincode) if ok else None
+    return {
+        "pincode": pincode,
+        "serviceable": ok,
+        "provider": provider.slug if provider else None,
+        "provider_name": provider.display_name if provider else None,
+        "eta_days": "3–6 business days" if ok else None,
+    }
+
+
+def _derive_shipment_status(order: dict) -> str:
+    """Combine internal status + latest courier event into a single display status
+    from INTERNAL_TIMELINE. Precedence: courier event > internal status."""
+    events = order.get("courier_events") or []
+    if events:
+        last = events[-1].get("status")
+        if last in INTERNAL_TIMELINE:
+            return last
+    internal = order.get("status", "PLACED")
+    # Map admin transitions into finer-grained display statuses
+    if internal == "PLACED":
+        return "PLACED"
+    if internal == "PACKED":
+        return "PACKED"
+    if internal == "SHIPPED":
+        return "SHIPPED"
+    if internal == "DELIVERED":
+        return "DELIVERED"
+    return internal
+
+
+# ---------- Admin shipment management ----------
+@api.patch("/admin/orders/{order_id}/shipment")
+async def admin_update_shipment(order_id: str, upd: ShipmentUpdate, user=Depends(require_admin)):
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    payload = {k: v for k, v in upd.model_dump().items() if v is not None}
+    if not payload:
+        raise HTTPException(400, "Nothing to update")
+    # Keep last_tracking_at fresh whenever any shipment field changes
+    payload["last_tracking_at"] = now_iso()
+    await db.orders.update_one({"id": order_id}, {"$set": payload})
+    await audit(user["id"], "shipment.update", order_id, {"keys": list(payload.keys())})
+    return {"ok": True}
+
+
+@api.post("/admin/orders/{order_id}/tracking-event")
+async def admin_add_tracking_event(order_id: str, ev: TrackingEventIn, user=Depends(require_admin)):
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    event = {
+        "status": ev.status.upper().strip(),
+        "note": ev.note or "",
+        "location": ev.location or "",
+        "at": ev.at or now_iso(),
+        "source": "manual",
+    }
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$push": {"courier_events": event}, "$set": {"last_tracking_at": now_iso()}},
+    )
+    await audit(user["id"], "shipment.event", order_id, {"status": event["status"]})
+    return {"ok": True, "event": event}
+
+
+# ---------- Public webhook (courier → NileNest) ----------
+@api.post("/webhooks/shipping/{provider_slug}")
+async def shipping_webhook(provider_slug: str, payload: Dict[str, Any], request: Request):
+    """Courier posts tracking updates here. We accept the payload, normalize the status,
+    append an event, and update the order's shipment_status. Never generates fake data."""
+    awb = str(payload.get("awb") or payload.get("tracking_number") or "").strip()
+    order_number = str(payload.get("order_number") or payload.get("reference") or "").strip()
+    if not awb and not order_number:
+        raise HTTPException(400, "awb or order_number required")
+    query = {"awb": awb} if awb else {"order_number": order_number}
+    order = await db.orders.find_one(query, {"_id": 0})
+    if not order:
+        # store as orphan for audit/retry rather than 404
+        await db.shipping_orphans.insert_one({
+            "id": new_id(), "provider": provider_slug, "payload": payload, "at": now_iso(),
+        })
+        return {"ok": False, "reason": "order_not_found", "stored_for_retry": True}
+    provider = shipping_registry.get(provider_slug)
+    raw = str(payload.get("status") or payload.get("event") or "").strip()
+    mapped = provider.map_status(raw)
+    event = {
+        "status": mapped,
+        "raw_status": raw,
+        "note": payload.get("note") or payload.get("message") or "",
+        "location": payload.get("location") or "",
+        "at": payload.get("timestamp") or now_iso(),
+        "source": provider_slug,
+    }
+    upd = {"$push": {"courier_events": event},
+           "$set": {"last_tracking_at": now_iso(), "courier_slug": provider_slug,
+                    "courier_name": payload.get("courier_name") or provider.display_name}}
+    if payload.get("eta"):
+        upd["$set"]["eta"] = payload["eta"]
+    if payload.get("tracking_url"):
+        upd["$set"]["tracking_url"] = payload["tracking_url"]
+    upd["$set"]["shipment_status"] = mapped
+    await db.orders.update_one({"id": order["id"]}, upd)
+    return {"ok": True, "mapped_status": mapped}
+
+
+@api.get("/orders/{order_number}/tracking")
+async def get_order_tracking(order_number: str):
+    """Public tracking endpoint — no auth so shared links work.
+    Returns a NileNest-branded view; does NOT redirect to a courier website."""
+    order = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    events = order.get("courier_events") or []
+    display_status = _derive_shipment_status(order)
+    return {
+        "order_number": order["order_number"],
+        "internal_status": order.get("status"),
+        "shipment_status": display_status,
+        "courier_name": order.get("courier_name"),
+        "courier_slug": order.get("courier_slug"),
+        "awb": order.get("awb") or order.get("tracking_id"),
+        "shipment_id": order.get("shipment_id"),
+        "tracking_url": order.get("tracking_url"),
+        "eta": order.get("eta"),
+        "last_tracking_at": order.get("last_tracking_at"),
+        "timeline_steps": INTERNAL_TIMELINE,
+        "events": [
+            {"status": e["status"], "note": e.get("note", ""),
+             "location": e.get("location", ""), "at": e.get("at"),
+             "source": e.get("source", "internal")}
+            for e in events
+        ],
+        "order_timeline": order.get("timeline", []),  # internal admin transitions
+        "items": order.get("items", []),
+        "address": {
+            "city": order.get("address", {}).get("city"),
+            "state": order.get("address", {}).get("state"),
+            "pincode": order.get("address", {}).get("pincode"),
+        },
+    }
 
 
 @api.patch("/admin/orders/{order_id}")

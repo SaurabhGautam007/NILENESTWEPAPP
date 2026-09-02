@@ -85,11 +85,36 @@ function Dashboard() {
 
 function Orders() {
   const [orders, setOrders] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ courier_slug: "manual", courier_name: "", awb: "", tracking_url: "", eta: "", shipment_status: "" });
+  const [event, setEvent] = useState({ status: "", note: "", location: "" });
   const load = () => api.get("/admin/orders").then((r) => setOrders(r.data));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get("/shipping/providers").then((r) => setProviders(r.data)); }, []);
   const update = async (id, status) => {
     await api.patch(`/admin/orders/${id}`, { status, tracking_id: status === "SHIPPED" ? `TRK${Date.now().toString().slice(-8)}` : null });
     toast.success(`Marked ${status}`); load();
+  };
+  const openEdit = (o) => {
+    setEditing(o.id);
+    setForm({
+      courier_slug: o.courier_slug || "manual",
+      courier_name: o.courier_name || "",
+      awb: o.awb || o.tracking_id || "",
+      tracking_url: o.tracking_url || "",
+      eta: o.eta || "",
+      shipment_status: o.shipment_status || "",
+    });
+    setEvent({ status: "", note: "", location: "" });
+  };
+  const saveShipment = async () => {
+    await api.patch(`/admin/orders/${editing}/shipment`, form);
+    toast.success("Shipment updated"); setEditing(null); load();
+  };
+  const addEvent = async () => {
+    if (!event.status) return toast.error("Status required");
+    await api.post(`/admin/orders/${editing}/tracking-event`, event);
+    toast.success("Event added"); setEvent({ status: "", note: "", location: "" }); load();
   };
   const next = { PLACED: "PACKED", PACKED: "SHIPPED", SHIPPED: "DELIVERED" };
   return (
@@ -100,14 +125,61 @@ function Orders() {
             <div>
               <div className="font-medium">{o.order_number}</div>
               <div className="text-xs text-muted-foreground">{new Date(o.created_at).toLocaleString()} · {o.email}</div>
+              {(o.courier_name || o.awb) && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  {o.courier_name && <>Courier: <b>{o.courier_name}</b> · </>}
+                  {o.awb && <>AWB: <span className="font-mono">{o.awb}</span></>}
+                  {o.shipment_status && <> · Shipment: <b>{o.shipment_status}</b></>}
+                </div>
+              )}
             </div>
             <div className="text-sm">{money(o.total)}</div>
-            <div className="overline text-secondary">{o.status}</div>
+            <div className="text-xs">
+              <div className="overline text-secondary">Internal: {o.status}</div>
+              {o.shipment_status && o.shipment_status !== o.status && <div className="text-muted-foreground">Courier: {o.shipment_status}</div>}
+            </div>
             <div className="flex gap-2">
               {next[o.status] && <button onClick={() => update(o.id, next[o.status])} className="text-xs link-underline">→ {next[o.status]}</button>}
               {o.status !== "CANCELLED" && o.status !== "DELIVERED" && <button onClick={() => update(o.id, "CANCELLED")} className="text-xs text-destructive link-underline">Cancel</button>}
+              <button onClick={() => openEdit(o)} className="text-xs link-underline text-secondary">Shipment</button>
             </div>
           </div>
+          {editing === o.id && (
+            <div className="mt-4 pt-4 border-t border-border/40 grid md:grid-cols-2 gap-4">
+              <div>
+                <div className="overline text-secondary mb-2">Shipment details</div>
+                <div className="space-y-2 text-sm">
+                  <select value={form.courier_slug} onChange={(e) => setForm({...form, courier_slug: e.target.value})} className="w-full border border-border rounded-md p-2 bg-transparent text-sm">
+                    {providers.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+                  </select>
+                  <input value={form.courier_name} onChange={(e) => setForm({...form, courier_name: e.target.value})} placeholder="Courier display name (e.g. Delhivery)" className="w-full border border-border rounded-md p-2 bg-transparent text-sm" />
+                  <input value={form.awb} onChange={(e) => setForm({...form, awb: e.target.value})} placeholder="AWB / Tracking number" className="w-full border border-border rounded-md p-2 bg-transparent text-sm" />
+                  <input value={form.tracking_url} onChange={(e) => setForm({...form, tracking_url: e.target.value})} placeholder="Public tracking URL (optional)" className="w-full border border-border rounded-md p-2 bg-transparent text-sm" />
+                  <input value={form.eta} onChange={(e) => setForm({...form, eta: e.target.value})} placeholder="ETA (e.g. 12 Feb 2026)" className="w-full border border-border rounded-md p-2 bg-transparent text-sm" />
+                  <select value={form.shipment_status} onChange={(e) => setForm({...form, shipment_status: e.target.value})} className="w-full border border-border rounded-md p-2 bg-transparent text-sm">
+                    <option value="">— Shipment status —</option>
+                    {["PACKED","SHIPPED","IN_TRANSIT","OUT_FOR_DELIVERY","DELIVERED"].map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <button onClick={saveShipment} className="btn-primary text-xs">Save shipment</button>
+                </div>
+              </div>
+              <div>
+                <div className="overline text-secondary mb-2">Add tracking event</div>
+                <div className="space-y-2 text-sm">
+                  <select value={event.status} onChange={(e) => setEvent({...event, status: e.target.value})} className="w-full border border-border rounded-md p-2 bg-transparent text-sm">
+                    <option value="">— Select status —</option>
+                    {["PACKED","SHIPPED","IN_TRANSIT","OUT_FOR_DELIVERY","DELIVERED"].map((s) => <option key={s} value={s}>{s.replace(/_/g," ")}</option>)}
+                  </select>
+                  <input value={event.location} onChange={(e) => setEvent({...event, location: e.target.value})} placeholder="Location (e.g. Pune hub)" className="w-full border border-border rounded-md p-2 bg-transparent text-sm" />
+                  <input value={event.note} onChange={(e) => setEvent({...event, note: e.target.value})} placeholder="Note (e.g. Reached Pune delivery hub)" className="w-full border border-border rounded-md p-2 bg-transparent text-sm" />
+                  <button onClick={addEvent} className="btn-ghost text-xs">Append event</button>
+                </div>
+              </div>
+              <div className="md:col-span-2 text-right">
+                <button onClick={() => setEditing(null)} className="text-xs link-underline text-muted-foreground">Close</button>
+              </div>
+            </div>
+          )}
         </div>
       ))}
       {orders.length === 0 && <p className="text-sm text-muted-foreground">No orders yet.</p>}
