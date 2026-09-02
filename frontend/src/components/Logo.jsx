@@ -30,11 +30,11 @@ export const Logo = ({ className = "" }) => (
   </div>
 );
 
-/** Header lockup — the same asset at a larger height. */
+/** Header lockup — the same asset at a compact header height. */
 export const LogoHorizontal = ({ className = "" }) => (
   <img
     {...commonImgProps}
-    className={`h-20 sm:h-24 md:h-28 lg:h-32 w-auto object-contain select-none ${className}`}
+    className={`h-11 sm:h-12 w-auto object-contain select-none ${className}`}
   />
 );
 

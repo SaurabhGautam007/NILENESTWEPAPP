@@ -1,0 +1,24 @@
+{
+  "summary": "Retested header logo compact revert at 1440x900 with cache-busting query. Header logo height=48px, width=133.11px (matches h-11/h-12 target 40-52 & width 130-160). Header container height=80px (h-20, within 60-84). srcSet contains all three /nilenest-logo.png variants. Nav items (Shop, Journal, Transparency, FAQ) and header icons (search/account/cart) all visible without overlap. Footer stacked logo height=112px (within 96-120 unchanged target). No console errors related to logo image loading. Bug is FIXED.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Header logo measurements confirmed at 1440x900: img 133.11x48, container height 80. Footer logo 310.59x112. srcset includes @1x/@2x/@3x with ?v=3 cache-buster. No console errors.",
+  "measurements": {
+    "header_logo": {"width": 133.109375, "height": 48},
+    "header_container": {"width": 1280, "height": 80},
+    "footer_logo": {"width": 310.59375, "height": 112},
+    "srcset": "/nilenest-logo.png?v=3 1x, /nilenest-logo@2x.png?v=3 2x, /nilenest-logo@3x.png?v=3 3x"
+  }
+}
