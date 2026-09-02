@@ -12,12 +12,13 @@ const STARTER_PROMPTS = [
   "How is your makhana different from regular snacks?",
 ];
 
-const OPENING_MESSAGE =
-  "Hi, I'm your NileNest Wellness Guide. I'm here the way a caring family member would be — first I'll try to understand what you're looking for, then explain the nutrition side simply, and only then talk about products (if any of ours honestly fit). What's on your mind today?";
+// 2-line trust-building intro. Kept short so it always fits above the fold.
+const OPENING_LINE_1 = "Namaste. I'm the NileNest family guide.";
+const OPENING_LINE_2 = "Ask me about any wellness concern, ingredient, or product — I'll give you an honest, point-to-point answer.";
 
 export default function AIChat() {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState([{ role: "assistant", content: OPENING_MESSAGE }]);
+  const [messages, setMessages] = useState([]); // greeting stays outside the log, always visible
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [sessionId] = useState(() => `s-${Math.random().toString(36).slice(2, 10)}`);
@@ -79,7 +80,7 @@ export default function AIChat() {
   const contextLabel = ai?.getProduct()
     ? "Talking about the product you're viewing"
     : "Family wellness guide · Not a medical advisor";
-  const showStarters = messages.length <= 1 && !sending;
+  const showStarters = messages.length === 0 && !sending;
 
   return (
     <>
@@ -90,7 +91,7 @@ export default function AIChat() {
       </button>
       {open && (
         <div role="dialog" aria-label="NileNest Wellness Guide chat" className="fixed bottom-24 right-6 w-[92vw] sm:w-[420px] max-h-[76vh] bg-background border border-border rounded-2xl shadow-2xl flex flex-col z-50 animate-fade-up">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 flex-none">
             <div>
               <div className="font-display text-lg flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-secondary" /> Wellness Guide
@@ -99,15 +100,18 @@ export default function AIChat() {
             </div>
             <button onClick={() => setOpen(false)} className="p-1 hover:bg-accent rounded-full"><X className="w-4 h-4" /></button>
           </div>
-          <div ref={scrollRef} data-testid={TID.ai.log} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 text-sm">
-            {messages.map((m, i) => (
-              <div key={i} className={`max-w-[88%] rounded-2xl px-3 py-2 whitespace-pre-wrap leading-relaxed ${m.role === "user" ? "ml-auto bg-primary text-primary-foreground" : "bg-accent text-accent-foreground"}`}>
-                {m.content || (sending && i === messages.length - 1 ? <span className="opacity-60">…</span> : "")}
-              </div>
-            ))}
+
+          {/* PINNED greeting — always visible, does not scroll away */}
+          <div className="px-4 py-3 border-b border-border/60 bg-accent/40 flex-none">
+            <div className="font-display text-base leading-snug text-primary">{OPENING_LINE_1}</div>
+            <div className="text-xs leading-relaxed text-muted-foreground mt-1">{OPENING_LINE_2}</div>
+          </div>
+
+          {/* Scrollable log — starters or messages */}
+          <div ref={scrollRef} data-testid={TID.ai.log} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-sm">
             {showStarters && (
-              <div className="pt-2">
-                <div className="text-[10px] tracking-widest uppercase text-muted-foreground mb-2">Try asking</div>
+              <>
+                <div className="text-[10px] tracking-widest uppercase text-muted-foreground">Try asking</div>
                 <div className="flex flex-wrap gap-2">
                   {STARTER_PROMPTS.map((p) => (
                     <button
@@ -120,10 +124,16 @@ export default function AIChat() {
                     </button>
                   ))}
                 </div>
-              </div>
+              </>
             )}
+            {messages.map((m, i) => (
+              <div key={i} className={`max-w-[88%] rounded-2xl px-3 py-2 whitespace-pre-wrap leading-relaxed ${m.role === "user" ? "ml-auto bg-primary text-primary-foreground" : "bg-accent text-accent-foreground"}`}>
+                {m.content || (sending && i === messages.length - 1 ? <span className="opacity-60">…</span> : "")}
+              </div>
+            ))}
           </div>
-          <div className="border-t border-border/60 px-3 pt-3 pb-2">
+
+          <div className="border-t border-border/60 px-3 pt-3 pb-2 flex-none">
             <div className="flex gap-2">
               <input data-testid={TID.ai.input} value={input} onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && send()}
