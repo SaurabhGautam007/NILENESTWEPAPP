@@ -1,10 +1,11 @@
 import React from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
-import { ShoppingBag, User, Search, Leaf } from "lucide-react";
+import { ShoppingBag, User, Search } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import CartDrawer from "@/components/CartDrawer";
 import AIChat from "@/components/AIChat";
+import { LogoHorizontal, Logo } from "@/components/Logo";
 import { TID } from "@/constants/testIds";
 
 const nav = [
@@ -24,11 +25,8 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col">
       <header data-testid={TID.header.root} className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-xl">
         <div className="container-nl flex items-center justify-between h-16 md:h-20">
-          <Link to="/" data-testid={TID.header.logo} className="flex items-center gap-2 group">
-            <span className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
-              <Leaf className="w-4 h-4" />
-            </span>
-            <span className="font-display text-2xl tracking-tight">NileNest</span>
+          <Link to="/" data-testid={TID.header.logo} className="flex items-center group">
+            <LogoHorizontal />
           </Link>
           <nav className="hidden md:flex items-center gap-8">
             {nav.map((n) => (
@@ -65,8 +63,8 @@ export default function Layout() {
       <footer className="mt-24 border-t border-border/60 bg-accent/40">
         <div className="container-nl py-16 grid grid-cols-2 md:grid-cols-4 gap-10">
           <div className="col-span-2">
-            <div className="font-display text-3xl">NileNest</div>
-            <p className="mt-3 text-sm text-muted-foreground max-w-xs leading-relaxed">
+            <Logo />
+            <p className="mt-6 text-sm text-muted-foreground max-w-xs leading-relaxed">
               Premium wellness essentials, traceable to a farm, a harvest, and a hand.
             </p>
           </div>

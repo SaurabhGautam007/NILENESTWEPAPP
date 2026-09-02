@@ -57,6 +57,9 @@ Premium D2C wellness FMCG platform for a premium Indian brand launching with 2 S
 - Audit log
 
 ## Prioritised backlog (post v1)
+### Iteration 5 (Feb 2026) — DONE
+- ✅ **Brand logo shipped**: Pixel-accurate SVG mark (two gradient tea leaves rising above a terracotta arc) + "NILENEST" Cormorant Garamond bold uppercase wordmark. New `<Logo>` and `<LogoHorizontal>` components; header uses the horizontal lockup, footer uses the stacked full logo, and the SVG is set as the favicon.
+
 ### Iteration 4 (Feb 2026) — DONE
 - ✅ **NileNest Wellness Guide** (AI): Rewrote system prompt into a family-oriented wellness guide. Enforces the loop: understand → ask 1-3 questions → educate → discuss ingredients/nutrients → only then connect to a NileNest product (if any fit) → set realistic expectations. Refuses "burn belly fat", "detox", "cure X" claims. Escalates safety cases (pregnancy, prescription meds, severe symptoms).
 - ✅ **Rich product grounding**: `build_ai_context` now feeds full description, ingredients, nutrition per serving, certifications, transparency to the model so no hallucination.
