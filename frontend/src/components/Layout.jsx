@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, Link, NavLink, useLocation } from "react-router-dom";
-import { ShoppingBag, User, Search } from "lucide-react";
+import { ShoppingBag, User, Search, Menu, X } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import CartDrawer from "@/components/CartDrawer";
@@ -8,41 +8,56 @@ import AIChat from "@/components/AIChat";
 import { LogoHorizontal, Logo } from "@/components/Logo";
 import { TID } from "@/constants/testIds";
 
-const nav = [
-  { to: "/shop", label: "Shop", tid: TID.header.navShop },
-  { to: "/journal", label: "Journal", tid: TID.header.navJournal },
-  { to: "/transparency", label: "Transparency", tid: TID.header.navTransparency },
-  { to: "/faq", label: "FAQ", tid: TID.header.navFaq },
+const NAV = [
+  { to: "/shop",         label: "Shop",       tid: TID.header.navShop },
+  { to: "/about",        label: "About Us",   tid: "nav-about" },
+  { to: "/journal",      label: "Journal",    tid: TID.header.navJournal },
+  { to: "/contact",      label: "Contact",    tid: "nav-contact" },
+  { to: "/faq",          label: "FAQ",        tid: TID.header.navFaq },
 ];
+
+const navLinkClass = ({ isActive }) =>
+  `relative text-sm py-2 transition-colors ${isActive ? "text-primary font-medium" : "text-muted-foreground hover:text-primary"}`;
+
+const ActiveDot = ({ show }) => show ? (
+  <span aria-hidden className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-secondary" />
+) : null;
 
 export default function Layout() {
   const { cart, setOpen } = useCart();
   const { user } = useAuth();
   const { pathname } = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
   const hideChat = pathname.startsWith("/admin") || pathname.startsWith("/checkout");
+
+  // Close mobile drawer on route change
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
 
   return (
     <div className="min-h-screen flex flex-col">
       <header data-testid={TID.header.root} className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-xl">
         <div className="container-nl flex items-center justify-between h-16 md:h-20">
-          <Link to="/" data-testid={TID.header.logo} className="flex items-center group">
+          <Link to="/" data-testid={TID.header.logo} className="flex items-center">
             <LogoHorizontal />
           </Link>
-          <nav className="hidden md:flex items-center gap-8">
-            {nav.map((n) => (
-              <NavLink key={n.to} to={n.to} data-testid={n.tid}
-                className={({isActive}) => `text-sm ${isActive ? "text-primary font-medium" : "text-muted-foreground hover:text-primary"} transition-colors`}>
-                {n.label}
+
+          {/* Desktop primary nav */}
+          <nav className="hidden lg:flex items-center gap-8" aria-label="Main">
+            {NAV.map((n) => (
+              <NavLink key={n.to} to={n.to} data-testid={n.tid} className={navLinkClass}>
+                {({ isActive }) => (<span className="relative">{n.label}<ActiveDot show={isActive} /></span>)}
               </NavLink>
             ))}
           </nav>
+
+          {/* Utility actions */}
           <div className="flex items-center gap-1">
-            <Link to="/shop" className="p-2 hover:bg-accent rounded-full transition-colors" aria-label="Search">
+            <Link to="/shop" className="p-2 hover:bg-accent rounded-full transition-colors hidden sm:inline-flex" aria-label="Search">
               <Search className="w-5 h-5" />
             </Link>
             <Link to={user ? (user.role === "admin" || user.role === "editor" ? "/admin" : "/account") : "/login"}
                   data-testid={user ? TID.header.accountBtn : TID.header.loginBtn}
-                  className="p-2 hover:bg-accent rounded-full transition-colors" aria-label="Account">
+                  className="p-2 hover:bg-accent rounded-full transition-colors hidden sm:inline-flex" aria-label="Account">
               <User className="w-5 h-5" />
             </Link>
             <button data-testid={TID.header.cartBtn} onClick={() => setOpen(true)}
@@ -54,12 +69,54 @@ export default function Layout() {
                 </span>
               )}
             </button>
+            {/* Mobile menu toggle */}
+            <button data-testid="mobile-menu-btn" onClick={() => setMenuOpen(true)}
+                    className="p-2 hover:bg-accent rounded-full transition-colors lg:hidden" aria-label="Open menu">
+              <Menu className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
+
+      {/* Mobile drawer */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden" data-testid="mobile-menu">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMenuOpen(false)} />
+          <aside className="absolute right-0 top-0 bottom-0 w-[86vw] max-w-sm bg-background flex flex-col animate-fade-up">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border/60">
+              <LogoHorizontal className="!h-9" />
+              <button onClick={() => setMenuOpen(false)} className="p-1.5 hover:bg-accent rounded-full" aria-label="Close menu">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Mobile">
+              {NAV.map((n) => (
+                <NavLink key={n.to} to={n.to} data-testid={`m-${n.tid}`}
+                  className={({isActive}) => `flex items-center justify-between px-3 py-3 rounded-md font-display text-xl ${isActive ? "text-secondary bg-accent/60" : "text-primary hover:bg-accent/40"}`}>
+                  {n.label}
+                </NavLink>
+              ))}
+              <div className="h-px bg-border/60 my-4" />
+              <Link to="/shop" className="flex items-center gap-3 px-3 py-3 text-sm text-muted-foreground hover:text-primary">
+                <Search className="w-4 h-4" /> Search
+              </Link>
+              <Link to={user ? "/account" : "/login"}
+                    className="flex items-center gap-3 px-3 py-3 text-sm text-muted-foreground hover:text-primary">
+                <User className="w-4 h-4" /> {user ? "My Account" : "Sign in"}
+              </Link>
+              <button onClick={() => { setMenuOpen(false); setOpen(true); }}
+                      className="w-full flex items-center gap-3 px-3 py-3 text-sm text-muted-foreground hover:text-primary text-left">
+                <ShoppingBag className="w-4 h-4" /> Cart {cart.item_count > 0 && <span className="ml-auto text-secondary">{cart.item_count}</span>}
+              </button>
+            </nav>
+          </aside>
+        </div>
+      )}
+
       <main className="flex-1">
         <Outlet />
       </main>
+
       <footer className="mt-24 border-t border-border/60 bg-accent/40">
         <div className="container-nl py-16 grid grid-cols-2 md:grid-cols-4 gap-10">
           <div className="col-span-2">
@@ -69,20 +126,21 @@ export default function Layout() {
             </p>
           </div>
           <div>
-            <div className="overline text-secondary mb-3">Shop</div>
+            <div className="overline text-secondary mb-3">Explore</div>
             <ul className="space-y-2 text-sm">
-              <li><Link to="/shop/teas-infusions" className="hover:text-secondary">Teas & Infusions</Link></li>
-              <li><Link to="/shop/clean-snacks" className="hover:text-secondary">Clean Snacks</Link></li>
-              <li><Link to="/shop" className="hover:text-secondary">All Products</Link></li>
+              <li><Link to="/shop" className="hover:text-secondary">Shop</Link></li>
+              <li><Link to="/about" className="hover:text-secondary">About Us</Link></li>
+              <li><Link to="/journal" className="hover:text-secondary">Journal</Link></li>
+              <li><Link to="/transparency" className="hover:text-secondary">Transparency</Link></li>
             </ul>
           </div>
           <div>
-            <div className="overline text-secondary mb-3">Company</div>
+            <div className="overline text-secondary mb-3">Support</div>
             <ul className="space-y-2 text-sm">
-              <li><Link to="/transparency" className="hover:text-secondary">Transparency</Link></li>
-              <li><Link to="/journal" className="hover:text-secondary">Journal</Link></li>
               <li><Link to="/contact" className="hover:text-secondary">Contact</Link></li>
               <li><Link to="/faq" className="hover:text-secondary">FAQ</Link></li>
+              <li><Link to="/faq" className="hover:text-secondary">Shipping & Returns</Link></li>
+              <li><Link to="/faq" className="hover:text-secondary">Privacy</Link></li>
             </ul>
           </div>
         </div>

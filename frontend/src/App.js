@@ -11,6 +11,7 @@ import OrderTracking from "@/pages/OrderTracking";
 import Journal from "@/pages/Journal";
 import Article from "@/pages/Article";
 import Faq from "@/pages/Faq";
+import About from "@/pages/About";
 import Transparency from "@/pages/Transparency";
 import Contact from "@/pages/Contact";
 import Login from "@/pages/Login";
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/track/:orderNumber" element={<OrderTracking />} />
           <Route path="/journal" element={<Journal />} />
           <Route path="/journal/:slug" element={<Article />} />
+          <Route path="/about" element={<About />} />
           <Route path="/faq" element={<Faq />} />
           <Route path="/transparency" element={<Transparency />} />
           <Route path="/contact" element={<Contact />} />
