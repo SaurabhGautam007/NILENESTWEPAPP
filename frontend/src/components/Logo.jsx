@@ -1,72 +1,82 @@
 import React from "react";
 
 /**
- * NileNest brand mark — two mirrored tea leaves rising above a terracotta arc.
- * Pure inline SVG. Scales cleanly at any size.
+ * NileNest brand mark — two mirrored tea leaves rising above a maroon arc.
+ * SVG-only, scales to any size crisply.
+ * viewBox chosen to give generous headroom for the leaves & tight breathing room around the arc.
  */
 export const BrandMark = ({ className = "w-10 h-10", title = "NileNest" }) => (
   <svg
     role="img"
     aria-label={title}
-    viewBox="0 0 120 74"
+    viewBox="0 0 220 130"
     xmlns="http://www.w3.org/2000/svg"
     className={className}
   >
     <defs>
-      <linearGradient id="nn-leaf" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor="#9CC757" />
-        <stop offset="55%" stopColor="#5FA23A" />
-        <stop offset="100%" stopColor="#2F7A28" />
+      <linearGradient id="nn-leafGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+        <stop offset="0%" stopColor="#B5D66E" />
+        <stop offset="45%" stopColor="#7BBA3B" />
+        <stop offset="100%" stopColor="#2E7A22" />
       </linearGradient>
-      <linearGradient id="nn-arc" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stopColor="#7A1F1F" stopOpacity="0.6" />
-        <stop offset="50%" stopColor="#8E2B2B" />
-        <stop offset="100%" stopColor="#7A1F1F" stopOpacity="0.6" />
-      </linearGradient>
-      <symbol id="nn-leaf-shape" viewBox="-20 -30 40 60">
+      <symbol id="nn-leaf" viewBox="-32 -52 64 100">
+        {/* Pointed-top, rounded-base tea leaf */}
         <path
-          d="M 0 -28 C 12 -20 16 12 0 28 C -16 12 -12 -20 0 -28 Z"
-          fill="url(#nn-leaf)"
+          d="M 0 -48 C 22 -34 26 20 0 46 C -26 20 -22 -34 0 -48 Z"
+          fill="url(#nn-leafGrad)"
         />
-        {/* central vein */}
-        <path d="M 0 -26 L 0 26" stroke="#F4FBE9" strokeWidth="1.1" strokeLinecap="round" opacity="0.9" />
-        {/* left veins */}
-        <path d="M 0 -16 Q -6 -10 -10 -3" stroke="#F4FBE9" strokeWidth="0.7" fill="none" opacity="0.75" strokeLinecap="round" />
-        <path d="M 0 -3 Q -6 3 -11 10" stroke="#F4FBE9" strokeWidth="0.7" fill="none" opacity="0.75" strokeLinecap="round" />
-        <path d="M 0 10 Q -5 15 -8 20" stroke="#F4FBE9" strokeWidth="0.7" fill="none" opacity="0.75" strokeLinecap="round" />
-        {/* right veins */}
-        <path d="M 0 -16 Q 6 -10 10 -3" stroke="#F4FBE9" strokeWidth="0.7" fill="none" opacity="0.75" strokeLinecap="round" />
-        <path d="M 0 -3 Q 6 3 11 10" stroke="#F4FBE9" strokeWidth="0.7" fill="none" opacity="0.75" strokeLinecap="round" />
-        <path d="M 0 10 Q 5 15 8 20" stroke="#F4FBE9" strokeWidth="0.7" fill="none" opacity="0.75" strokeLinecap="round" />
+        {/* Central vein */}
+        <path
+          d="M 0 -44 L 0 42"
+          stroke="#F6FBEA"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity="0.92"
+        />
+        {/* Left veins */}
+        <path d="M 0 -28 Q -10 -20 -16 -8" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.85" />
+        <path d="M 0 -12 Q -12 -4 -20 8" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.85" />
+        <path d="M 0 6 Q -10 14 -16 24" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.85" />
+        <path d="M 0 22 Q -7 28 -10 34" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.8" />
+        {/* Right veins */}
+        <path d="M 0 -28 Q 10 -20 16 -8" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.85" />
+        <path d="M 0 -12 Q 12 -4 20 8" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.85" />
+        <path d="M 0 6 Q 10 14 16 24" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.85" />
+        <path d="M 0 22 Q 7 28 10 34" stroke="#F6FBEA" strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.8" />
       </symbol>
     </defs>
 
-    {/* Terracotta arc — thin crescent, tapered at both ends */}
+    {/* Maroon crescent arc — solid, thin, tapered at both ends, slight upward curve */}
     <path
-      d="M 8 55 Q 60 34 112 55 Q 60 46 8 55 Z"
-      fill="url(#nn-arc)"
+      d="M 20 100 Q 110 62 200 100 Q 110 80 20 100 Z"
+      fill="#8B1B1F"
     />
 
-    {/* Left leaf, angled outward */}
-    <g transform="translate(52 30) rotate(-26)">
-      <use href="#nn-leaf-shape" x="-20" y="-30" width="40" height="60" />
+    {/* Left leaf */}
+    <g transform="translate(96 58) rotate(-22)">
+      <use href="#nn-leaf" x="-32" y="-52" width="64" height="100" />
     </g>
-    {/* Right leaf, mirrored */}
-    <g transform="translate(68 30) rotate(26)">
-      <use href="#nn-leaf-shape" x="-20" y="-30" width="40" height="60" />
+    {/* Right leaf */}
+    <g transform="translate(124 58) rotate(22)">
+      <use href="#nn-leaf" x="-32" y="-52" width="64" height="100" />
     </g>
   </svg>
 );
+
+const wordmarkStyle = { fontFamily: "'Playfair Display', 'Cormorant Garamond', serif", fontWeight: 900 };
 
 /**
  * Full lockup — mark above wordmark. Use for footers, splash, order confirmations.
  */
 export const Logo = ({ tone = "dark", className = "" }) => {
-  const textColor = tone === "light" ? "text-primary-foreground" : "text-primary";
+  const textColor = tone === "light" ? "text-primary-foreground" : "text-black";
   return (
     <div className={`flex flex-col items-center ${className}`}>
-      <BrandMark className="w-24 h-16" />
-      <div className={`font-display font-bold uppercase tracking-[0.28em] text-2xl ${textColor} mt-1`}>
+      <BrandMark className="w-32 h-20 md:w-36 md:h-24" />
+      <div
+        className={`uppercase tracking-[0.14em] text-3xl md:text-4xl ${textColor} leading-none -mt-1`}
+        style={wordmarkStyle}
+      >
         NileNest
       </div>
     </div>
@@ -74,12 +84,15 @@ export const Logo = ({ tone = "dark", className = "" }) => {
 };
 
 /**
- * Horizontal lockup — mark left, wordmark right. Use for header.
+ * Horizontal lockup — mark left, wordmark right. Header use.
  */
 export const LogoHorizontal = ({ className = "" }) => (
   <div className={`flex items-center gap-2.5 ${className}`}>
-    <BrandMark className="w-11 h-8 sm:w-12 sm:h-9" />
-    <span className="font-display font-bold uppercase tracking-[0.22em] text-lg sm:text-xl text-primary leading-none">
+    <BrandMark className="w-12 h-9 sm:w-14 sm:h-10" />
+    <span
+      className="uppercase tracking-[0.12em] text-lg sm:text-xl text-black leading-none"
+      style={wordmarkStyle}
+    >
       NileNest
     </span>
   </div>
