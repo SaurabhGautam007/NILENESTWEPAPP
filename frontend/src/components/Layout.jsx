@@ -24,7 +24,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen flex flex-col">
       <header data-testid={TID.header.root} className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-xl">
-        <div className="container-nl flex items-center justify-between h-20 md:h-24">
+        <div className="container-nl flex items-center justify-between h-24 md:h-28">
           <Link to="/" data-testid={TID.header.logo} className="flex items-center group">
             <LogoHorizontal />
           </Link>
