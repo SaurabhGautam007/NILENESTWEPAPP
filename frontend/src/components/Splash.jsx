@@ -5,8 +5,8 @@ export default function Splash() {
   const [fading, setFading] = useState(false);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setFading(true), 650);
-    const t2 = setTimeout(() => setVisible(false), 1500);
+    const t1 = setTimeout(() => setFading(true), 900);
+    const t2 = setTimeout(() => setVisible(false), 1400);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
@@ -16,7 +16,7 @@ export default function Splash() {
     <div
       data-testid="splash"
       aria-hidden="true"
-      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background transition-opacity duration-700 ease-out pointer-events-none ${fading ? "opacity-0" : "opacity-100"}`}
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background transition-opacity duration-500 ease-out pointer-events-none ${fading ? "opacity-0" : "opacity-100"}`}
     >
       <div className="animate-fade-up">
         <img
