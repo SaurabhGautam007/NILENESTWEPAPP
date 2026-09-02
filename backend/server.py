@@ -210,6 +210,36 @@ async def send_email(*, to: str, subject: str, html: str, reply_to: Optional[str
         return None
 
 
+EMAIL_LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 140" width="140" height="82" style="display:block;margin:0 auto">'
+    '<defs>'
+    '<linearGradient id="l" x1="0.5" y1="0" x2="0.5" y2="1">'
+    '<stop offset="0%" stop-color="#BDDD73"/>'
+    '<stop offset="45%" stop-color="#7DBC3B"/>'
+    '<stop offset="100%" stop-color="#2E7A22"/>'
+    '</linearGradient>'
+    '</defs>'
+    '<path d="M 24 108 Q 120 70 216 108 Q 120 88 24 108 Z" fill="#8B1B1F"/>'
+    '<g transform="translate(112 82) rotate(-22)">'
+    '<path d="M 0 0 C -6 -8 -18 -18 -22 -34 C -24 -50 -14 -70 0 -80 C 14 -70 24 -50 22 -34 C 18 -18 6 -8 0 0 Z" fill="url(#l)"/>'
+    '<path d="M 0 -2 L 0 -78" stroke="#F4FBE9" stroke-width="1.4" stroke-linecap="round" opacity="0.95"/>'
+    '</g>'
+    '<g transform="translate(128 82) rotate(22)">'
+    '<path d="M 0 0 C -6 -8 -18 -18 -22 -34 C -24 -50 -14 -70 0 -80 C 14 -70 24 -50 22 -34 C 18 -18 6 -8 0 0 Z" fill="url(#l)"/>'
+    '<path d="M 0 -2 L 0 -78" stroke="#F4FBE9" stroke-width="1.4" stroke-linecap="round" opacity="0.95"/>'
+    '</g>'
+    '</svg>'
+)
+
+EMAIL_LOGO_HEADER = (
+    '<table role="presentation" width="100%" style="background:#F9F8F6;padding:36px 0 12px 0">'
+    '<tr><td align="center">'
+    + EMAIL_LOGO_SVG +
+    '<div style="font-family:Georgia,\'Times New Roman\',serif;font-size:26px;font-weight:700;letter-spacing:4px;color:#111;margin-top:6px;text-transform:uppercase">NileNest</div>'
+    '</td></tr></table>'
+)
+
+
 def _order_email_html(order: dict) -> str:
     rows = "".join(
         f'<tr><td style="padding:8px 0;border-bottom:1px solid #EBE9E4">{escape(i["title"])} — {escape(i["variant_name"])} × {i["quantity"]}</td>'
@@ -217,8 +247,9 @@ def _order_email_html(order: dict) -> str:
         for i in order["items"]
     )
     return (
+        EMAIL_LOGO_HEADER +
         f'<table role="presentation" width="100%" style="background:#F9F8F6;font-family:Arial,sans-serif;color:#1A3A2F">'
-        f'<tr><td style="padding:32px 24px">'
+        f'<tr><td style="padding:8px 24px 32px 24px">'
         f'<div style="font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:#C05A42">Order confirmed</div>'
         f'<h1 style="font-family:Georgia,serif;font-size:28px;margin:8px 0 24px">Thank you, {escape(order["address"]["name"].split()[0])}.</h1>'
         f'<p>Your NileNest order <strong>{escape(order["order_number"])}</strong> is confirmed.</p>'
@@ -234,8 +265,9 @@ def _order_email_html(order: dict) -> str:
 
 def _shipping_email_html(order: dict) -> str:
     return (
+        EMAIL_LOGO_HEADER +
         f'<table role="presentation" width="100%" style="background:#F9F8F6;font-family:Arial,sans-serif;color:#1A3A2F">'
-        f'<tr><td style="padding:32px 24px">'
+        f'<tr><td style="padding:8px 24px 32px 24px">'
         f'<div style="font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:#C05A42">On its way</div>'
         f'<h1 style="font-family:Georgia,serif;font-size:28px;margin:8px 0 16px">Your order has shipped.</h1>'
         f'<p>Order <strong>{escape(order["order_number"])}</strong> is now on the way.</p>'

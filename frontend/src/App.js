@@ -1,6 +1,7 @@
 import React from "react";
 import { Routes, Route } from "react-router-dom";
 import Layout from "@/components/Layout";
+import Splash from "@/components/Splash";
 import Home from "@/pages/Home";
 import Shop from "@/pages/Shop";
 import Product from "@/pages/Product";
@@ -22,6 +23,7 @@ import "@/App.css";
 export default function App() {
   return (
     <div className="App">
+      <Splash />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
