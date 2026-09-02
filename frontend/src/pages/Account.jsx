@@ -6,6 +6,19 @@ import { useCart } from "@/context/CartContext";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 
+function TrackForm() {
+  const [num, setNum] = useState("");
+  const nav = useNavigate();
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (num.trim()) nav(`/track/${num.trim()}`); }} className="flex gap-2">
+      <input value={num} onChange={(e) => setNum(e.target.value)} placeholder="e.g. NN26XXXXXX"
+             data-testid="track-order-input"
+             className="flex-1 border border-border rounded-md p-2 text-sm bg-background focus:outline-none focus:border-secondary" />
+      <button type="submit" data-testid="track-order-submit" className="btn-secondary text-xs px-4 py-2">Track</button>
+    </form>
+  );
+}
+
 export default function Account() {
   const { user, loading, logout } = useAuth();
   const { add } = useCart();
@@ -43,10 +56,15 @@ export default function Account() {
             <div className="font-medium">{user.name}</div>
             <div className="text-muted-foreground">{user.email}</div>
           </div>
+          <div className="mt-6 pt-6 border-t border-border/60">
+            <div className="overline text-secondary mb-2">Track an order</div>
+            <p className="text-xs text-muted-foreground mb-3">Enter your order number to see its progress.</p>
+            <TrackForm />
+          </div>
         </div>
 
         <div className="lg:col-span-2">
-          <div className="overline text-secondary mb-4">Orders ({orders.length})</div>
+          <div className="overline text-secondary mb-4">My Orders ({orders.length})</div>
           {orders.length === 0 && <p className="text-muted-foreground text-sm">No orders yet — <Link to="/shop" className="link-underline">start with something considered</Link>.</p>}
           <div className="space-y-3">
             {orders.map((o) => (

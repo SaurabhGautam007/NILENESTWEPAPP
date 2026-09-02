@@ -1529,7 +1529,7 @@ async def check_serviceability(pincode: str):
         "serviceable": ok,
         "provider": provider.slug if provider else None,
         "provider_name": provider.display_name if provider else None,
-        "eta_days": "3–6 business days" if ok else None,
+        "eta_days": None,
     }
 
 

@@ -52,7 +52,7 @@ export default function Layout() {
 
           {/* Utility actions */}
           <div className="flex items-center gap-1">
-            <Link to="/shop" className="p-2 hover:bg-accent rounded-full transition-colors hidden sm:inline-flex" aria-label="Search">
+            <Link to="/shop" className="p-2 hover:bg-accent rounded-full transition-colors" aria-label="Search">
               <Search className="w-5 h-5" />
             </Link>
             <Link to={user ? (user.role === "admin" || user.role === "editor" ? "/admin" : "/account") : "/login"}
@@ -69,7 +69,6 @@ export default function Layout() {
                 </span>
               )}
             </button>
-            {/* Mobile menu toggle */}
             <button data-testid="mobile-menu-btn" onClick={() => setMenuOpen(true)}
                     className="p-2 hover:bg-accent rounded-full transition-colors lg:hidden" aria-label="Open menu">
               <Menu className="w-5 h-5" />
@@ -97,17 +96,9 @@ export default function Layout() {
                 </NavLink>
               ))}
               <div className="h-px bg-border/60 my-4" />
-              <Link to="/shop" className="flex items-center gap-3 px-3 py-3 text-sm text-muted-foreground hover:text-primary">
-                <Search className="w-4 h-4" /> Search
-              </Link>
-              <Link to={user ? "/account" : "/login"}
-                    className="flex items-center gap-3 px-3 py-3 text-sm text-muted-foreground hover:text-primary">
-                <User className="w-4 h-4" /> {user ? "My Account" : "Sign in"}
-              </Link>
-              <button onClick={() => { setMenuOpen(false); setOpen(true); }}
-                      className="w-full flex items-center gap-3 px-3 py-3 text-sm text-muted-foreground hover:text-primary text-left">
-                <ShoppingBag className="w-4 h-4" /> Cart {cart.item_count > 0 && <span className="ml-auto text-secondary">{cart.item_count}</span>}
-              </button>
+              <Link to="/account" data-testid="m-track-order" className="block px-3 py-2 text-sm text-primary hover:text-secondary">Track Order</Link>
+              <Link to="/account" data-testid="m-my-orders" className="block px-3 py-2 text-sm text-primary hover:text-secondary">My Orders</Link>
+              <Link to={user ? "/account" : "/login"} data-testid="m-account" className="block px-3 py-2 text-sm text-primary hover:text-secondary">{user ? "My Account" : "Sign in"}</Link>
             </nav>
           </aside>
         </div>

@@ -35,7 +35,7 @@ export default function Shop() {
 
       <section className="container-nl py-8">
         <div className="flex flex-wrap gap-3 items-center justify-between border-b border-border/60 pb-6">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
             <Link to="/shop" data-testid={TID.shop.categoryFilter("all")}
                   className={`text-xs tracking-wider uppercase px-4 py-2 rounded-full border ${!category ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary"}`}>
               All
@@ -46,6 +46,12 @@ export default function Shop() {
                 {c.name}
               </Link>
             ))}
+            {(q || sort || category) && (
+              <button data-testid="clear-filters" onClick={() => { setQ(""); setSort(""); if (category) window.location.href = "/shop"; }}
+                      className="text-xs tracking-wider uppercase px-3 py-2 rounded-full border border-secondary text-secondary hover:bg-secondary hover:text-secondary-foreground">
+                Clear all ×
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -62,6 +68,13 @@ export default function Shop() {
             </select>
           </div>
         </div>
+
+        {(q || sort) && (
+          <div className="flex flex-wrap gap-2 mt-4" data-testid="active-filter-chips">
+            {q && <button onClick={() => setQ("")} className="text-xs px-3 py-1 border border-border rounded-full hover:border-secondary">"{q}" ×</button>}
+            {sort && <button onClick={() => setSort("")} className="text-xs px-3 py-1 border border-border rounded-full hover:border-secondary">{sort === "price_asc" ? "Price ↑" : "Price ↓"} ×</button>}
+          </div>
+        )}
 
         <div data-testid={TID.shop.grid} className="mt-10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
           {products.map((p) => <ProductCard key={p.id} product={p} />)}
