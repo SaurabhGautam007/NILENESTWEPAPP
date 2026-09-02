@@ -77,7 +77,7 @@ export default function Home() {
           <div className="flex flex-wrap items-end justify-between mb-10 gap-4">
             <div>
               <div className="overline text-secondary">The Collection</div>
-              <h2 className="font-display text-4xl sm:text-5xl mt-2">Two products. Nothing extra.</h2>
+              <h2 className="font-display text-4xl sm:text-5xl mt-2">Considered essentials.</h2>
             </div>
             <Link to="/shop" className="text-sm text-primary link-underline flex items-center gap-1">Shop all <ArrowRight className="w-4 h-4" /></Link>
           </div>
@@ -93,7 +93,7 @@ export default function Home() {
           <div className="lg:col-span-5">
             <div className="overline text-secondary">Concierge</div>
             <h2 className="font-display text-4xl sm:text-5xl mt-3">Tell us the moment. We'll suggest the ritual.</h2>
-            <p className="mt-4 text-primary-foreground/70 max-w-md">Slow mornings, afternoon slumps, restless evenings. Share your moment and we'll pick from our two SKUs — never a medical suggestion, always a considered one.</p>
+            <p className="mt-4 text-primary-foreground/70 max-w-md">Slow mornings, afternoon slumps, restless evenings. Share your moment and we'll suggest something from our collection — never a medical suggestion, always a considered one.</p>
           </div>
           <div className="lg:col-span-7">
             <div className="bg-background text-foreground rounded-md p-6">

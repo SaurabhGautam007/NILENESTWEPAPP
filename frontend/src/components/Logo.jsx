@@ -63,7 +63,7 @@ export const BrandMark = ({ className = "w-10 h-10", title = "NileNest" }) => (
   </svg>
 );
 
-const wordmarkStyle = { fontFamily: "'Playfair Display', 'Cormorant Garamond', serif", fontWeight: 900 };
+const wordmarkStyle = { fontFamily: "'Playfair Display', 'Cormorant Garamond', serif", fontWeight: 700 };
 
 /**
  * Full lockup — mark above wordmark. Use for footers, splash, order confirmations.
@@ -74,7 +74,7 @@ export const Logo = ({ tone = "dark", className = "" }) => {
     <div className={`flex flex-col items-center ${className}`}>
       <BrandMark className="w-32 h-20 md:w-36 md:h-24" />
       <div
-        className={`uppercase tracking-[0.14em] text-3xl md:text-4xl ${textColor} leading-none -mt-1`}
+        className={`uppercase tracking-[0.12em] text-3xl md:text-4xl ${textColor} leading-none -mt-1`}
         style={wordmarkStyle}
       >
         NileNest
@@ -90,7 +90,7 @@ export const LogoHorizontal = ({ className = "" }) => (
   <div className={`flex items-center gap-2.5 ${className}`}>
     <BrandMark className="w-12 h-9 sm:w-14 sm:h-10" />
     <span
-      className="uppercase tracking-[0.12em] text-lg sm:text-xl text-black leading-none"
+      className="uppercase tracking-[0.1em] text-lg sm:text-xl text-black leading-none"
       style={wordmarkStyle}
     >
       NileNest

@@ -29,7 +29,7 @@ export default function Shop() {
         <div className="container-nl py-12 md:py-16">
           <div className="overline text-secondary">{currentCat ? currentCat.name : "The Shop"}</div>
           <h1 className="font-display text-5xl sm:text-6xl mt-3">{currentCat ? currentCat.name : "Everything we make."}</h1>
-          <p className="mt-4 max-w-xl text-muted-foreground">{currentCat?.description || "Two products, deeply considered. Each traceable to a named farm and a small-batch roast."}</p>
+          <p className="mt-4 max-w-xl text-muted-foreground">{currentCat?.description || "Everything we make, deeply considered. Each product traceable to a named farm and a small-batch roast."}</p>
         </div>
       </section>
 
