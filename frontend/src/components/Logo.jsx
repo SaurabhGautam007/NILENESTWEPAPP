@@ -2,45 +2,39 @@ import React from "react";
 
 /**
  * NileNest brand mark & lockups.
- * IMPORTANT: This is the ORIGINAL client-provided logo asset, used as-is.
- * Do not replace with an AI-generated SVG re-creation. Any resize is via width/height only.
+ * The client-provided original logo asset is served at 1x/2x/3x for retina crispness.
  */
-const LOGO_SRC = "/nilenest-logo.png?v=2";
+const LOGO_1X = "/nilenest-logo.png?v=3";
+const LOGO_2X = "/nilenest-logo@2x.png?v=3";
+const LOGO_3X = "/nilenest-logo@3x.png?v=3";
+const LOGO_SRCSET = `${LOGO_1X} 1x, ${LOGO_2X} 2x, ${LOGO_3X} 3x`;
+
+const commonImgProps = {
+  src: LOGO_1X,
+  srcSet: LOGO_SRCSET,
+  draggable: "false",
+  alt: "NileNest",
+  loading: "eager",
+  decoding: "sync",
+  style: { imageRendering: "-webkit-optimize-contrast" },
+};
 
 export const BrandMark = ({ className = "h-10", title = "NileNest" }) => (
-  <img
-    src={LOGO_SRC}
-    alt={title}
-    className={`${className} w-auto object-contain select-none`}
-    draggable="false"
-  />
+  <img {...commonImgProps} alt={title} className={`${className} w-auto object-contain select-none`} />
 );
 
-/**
- * Full lockup — logo image is already stacked (leaves + arc + NILENEST).
- * Use for footers, splash, order confirmations.
- */
+/** Full lockup — for footers, splash, order confirmations. */
 export const Logo = ({ className = "" }) => (
   <div className={`inline-flex items-center justify-center ${className}`}>
-    <img
-      src={LOGO_SRC}
-      alt="NileNest"
-      className="h-24 md:h-28 w-auto object-contain select-none"
-      draggable="false"
-    />
+    <img {...commonImgProps} className="h-24 md:h-28 w-auto object-contain select-none" />
   </div>
 );
 
-/**
- * Horizontal-space-efficient lockup — the full logo scaled to header height.
- * The reference asset already contains the mark + wordmark, so this is just a size variant.
- */
+/** Header lockup — the same asset at a larger height. */
 export const LogoHorizontal = ({ className = "" }) => (
   <img
-    src={LOGO_SRC}
-    alt="NileNest"
+    {...commonImgProps}
     className={`h-20 sm:h-24 md:h-28 lg:h-32 w-auto object-contain select-none ${className}`}
-    draggable="false"
   />
 );
 

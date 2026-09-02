@@ -20,10 +20,12 @@ export default function Splash() {
     >
       <div className="animate-fade-up">
         <img
-          src="/nilenest-logo.png?v=2"
+          src="/nilenest-logo.png?v=3"
+          srcSet="/nilenest-logo.png?v=3 1x, /nilenest-logo@2x.png?v=3 2x, /nilenest-logo@3x.png?v=3 3x"
           alt="NileNest"
           className="h-40 md:h-48 w-auto object-contain select-none"
           draggable="false"
+          style={{ imageRendering: "-webkit-optimize-contrast" }}
         />
       </div>
       <div className="mt-6 text-xs tracking-[0.28em] uppercase text-secondary">Nature, unhurried</div>
