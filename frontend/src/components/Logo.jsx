@@ -39,7 +39,7 @@ export const LogoHorizontal = ({ className = "" }) => (
   <img
     src={LOGO_SRC}
     alt="NileNest"
-    className={`h-16 sm:h-20 md:h-24 w-auto object-contain select-none ${className}`}
+    className={`h-20 sm:h-24 md:h-28 lg:h-32 w-auto object-contain select-none ${className}`}
     draggable="false"
   />
 );
